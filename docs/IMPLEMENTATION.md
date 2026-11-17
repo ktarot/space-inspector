@@ -90,7 +90,12 @@
 - [x] 전문 파일 관리 제품 방향, 향후 배타적 범위 선택/자동 탐색/백그라운드 리소스 제어 요구 문서화
 - [x] 로컬 테스트 55개 통과, Junction/하드링크 2개는 CI에서 검증
 - [x] WPF 중복 그룹/파일 화면 생성 및 렌더링 검증
-- [ ] Windows CI 및 배포 아티팩트 최종 확인
+- [x] 최종 Windows CI 57개 통과 (단위/UI 10, 통합 47), 실패/건너뜀 0
+- [x] Windows x64 자체 포함형 publish 및 아티팩트 업로드/다운로드 확인
+
+검증된 구현 커밋: `043aa28037e12b5dd814519d964b5ea76825645f`.
+[최종 Windows CI](https://github.com/ktarot/space-inspector/actions/runs/44104419955)에서 실제 Junction 및 하드링크 테스트를 포함해 모두 성공했습니다.
+[Phase 4 실행 파일](https://github.com/ktarot/space-inspector/actions/runs/44104419955/artifacts/14337342492) (GitHub 로그인 필요, 14일 보관).
 
 주요 파일: `WindowsVolumeIdentityService.cs`, `MetadataOnlyFileSource.cs`, `SqliteIndexDatabase*.cs`, `Core/DuplicateDetection/DuplicateAnalysisService.cs`, `WindowsFileFingerprintService.cs`, `MainViewModel.Duplicates.cs`, `MainWindow.xaml`, 장치/마이그레이션/중복 통합 테스트.
 

@@ -87,6 +87,6 @@
 - [x] WPF 분석 실행 → 그룹 선택 → 파일 목록 렌더링
 - [x] 로컬 전체 55개 통과, Junction/하드링크 2개 건너뜀
 - [x] 합성 Offline 속성 파일에서 콘텐츠 해시 미수행
-- [ ] CI 전체 결과
-- [ ] 실제 하드링크 동일 데이터 공간 제외 (CI에서 활성화)
+- [x] [최종 Windows CI](https://github.com/ktarot/space-inspector/actions/runs/44104419955): 57개 통과, 실패/건너뜀 0, 실행 파일 publish/업로드/다운로드 확인
+- [x] 실제 하드링크 동일 데이터 공간 제외 (Windows CI에서 실행)
 - [ ] 실제 OneDrive, 외장 장치 문자 재할당, ReFS/비NTFS, OS별 고배율, 대규모 성능
