@@ -23,6 +23,8 @@ jobs:
       - name: Build
         run: dotnet build SpaceInspector.slnx --configuration Release --no-restore
       - name: Test
+        env:
+          SPACE_INSPECTOR_JUNCTION_TEST: '1'
         run: dotnet test SpaceInspector.slnx --configuration Release --no-build --logger trx --results-directory TestResults
       - name: Publish Windows x64
         run: dotnet publish src/SpaceInspector.App/SpaceInspector.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output artifacts/win-x64

@@ -9,6 +9,7 @@ using SpaceInspector.App.Views;
 using SpaceInspector.Core.Interfaces;
 using SpaceInspector.Core.Models;
 using SpaceInspector.Infrastructure.Database;
+using SpaceInspector.Core.Indexing;
 using Xunit;
 
 namespace SpaceInspector.UnitTests;
@@ -21,11 +22,14 @@ public class WindowSmokeTests
         Exception? failure = null;
         var thread = new Thread(() =>
         {
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
             var directory = Path.Combine(Path.GetTempPath(), "SpaceInspector.Tests", Guid.NewGuid().ToString("N"));
             MainWindow? window = null;
             try
             {
-                var model = new MainViewModel(new FixtureDrives(), new SqliteIndexDatabase(Path.Combine(directory, "index.db")));
+                var database = new SqliteIndexDatabase(Path.Combine(directory, "index.db"));
+                var model = new MainViewModel(new FixtureDrives(), database,
+                    new FileIndexingService(new FixtureFiles(), database), database, () => [@"X:\Example"]);
                 window = new MainWindow(model) { ShowActivated = false, ShowInTaskbar = false, Left = -10000, Top = -10000 };
                 window.Show();
                 var deadline = DateTime.UtcNow.AddSeconds(15);
@@ -39,7 +43,21 @@ public class WindowSmokeTests
                 Assert.Single(model.Drives);
                 Assert.Equal("Space Inspector", window.Title);
                 Assert.Contains(Descendants(window).OfType<Button>(), b =>
-                    b.Content?.ToString() == "검사 시작 · 준비 중" && !b.IsEnabled);
+                    b.Content?.ToString() == "검사 시작 / 재검사" && !b.IsEnabled);
+                model.AddFolderCommand.Execute(null);
+                Assert.True(model.ScanCommand.CanExecute(null));
+                model.ScanCommand.Execute(null);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (model.IsBusy && DateTime.UtcNow < deadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                    Thread.Sleep(10);
+                }
+                Assert.False(model.IsBusy);
+                Assert.Contains("완료", model.Status);
+                Assert.Equal(3, model.Files.Count);
+                Assert.False(model.CancelCommand.CanExecute(null));
+                Assert.Equal(3, new SqliteIndexDatabase(Path.Combine(directory, "index.db")).GetSummaryAsync().GetAwaiter().GetResult().FileCount);
                 window.UpdateLayout();
                 var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(window);
@@ -81,5 +99,14 @@ public class WindowSmokeTests
     {
         public Task<IReadOnlyList<DriveSnapshot>> GetLocalDrivesAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<DriveSnapshot>>([new("X:\\", "테스트 드라이브", "Fixed", 512L << 30, 180L << 30, true, null)]);
+    }
+    private sealed class FixtureFiles : IFileMetadataSource
+    {
+        public IEnumerable<ScanObservation> Enumerate(IReadOnlyList<string> roots, CancellationToken cancellationToken)
+        {
+            foreach (var name in new[] { "보고서.pdf", "여행 사진.jpg", "프로젝트.zip" })
+                yield return new(new FileMetadata(Path.Combine(roots[0], name), name, Path.GetExtension(name), roots[0],
+                    @"X:\", 1024, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, false), null);
+        }
     }
 }
