@@ -34,6 +34,16 @@ public partial class App : Application
         {
             var dialog = new OpenFolderDialog { Title = "검사할 폴더 선택", Multiselect = true };
             return dialog.ShowDialog(MainWindow) == true ? dialog.FolderNames : [];
+        }, copyPath: Clipboard.SetText, revealFile: path =>
+        {
+            if (!System.IO.File.Exists(path)) throw new System.IO.FileNotFoundException("원본 파일이 없거나 접근할 수 없습니다. 드라이브 연결과 권한을 확인하세요.");
+            var start = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+            start.ArgumentList.Add("/select," + path);
+            System.Diagnostics.Process.Start(start);
+        }, pickReferenceFile: () =>
+        {
+            var dialog = new OpenFileDialog { Title = "기준 파일 선택 (이름·확장자 적용)", CheckFileExists = true };
+            return dialog.ShowDialog(MainWindow) == true ? dialog.FileName : null;
         });
         var window = new MainWindow(viewModel);
         MainWindow = window;

@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using SpaceInspector.Core.Interfaces;
 using SpaceInspector.Core.Models;
+using System.Globalization;
+using System.IO;
 
 namespace SpaceInspector.App.ViewModels;
 
@@ -17,6 +19,33 @@ public sealed class MainViewModel : ObservableObject
     private int _page;
     private long _total;
     private string? _selectedFolder;
+    private FileSearch _search = new();
+    private IndexedFile? _selectedFile;
+    private int _selectedTab = 1;
+    public int SelectedTab { get => _selectedTab; set { _selectedTab = value; Changed(); } }
+    private readonly IFileSearchRepository? _searchRepository;
+    public string NameFilter { get; set; } = "";
+    public string ExtensionsFilter { get; set; } = "";
+    public string MinimumSize { get; set; } = "";
+    public string MaximumSize { get; set; } = "";
+    public DateTime? CreatedFrom { get; set; }
+    public DateTime? CreatedTo { get; set; }
+    public DateTime? ModifiedFrom { get; set; }
+    public DateTime? ModifiedTo { get; set; }
+    public bool SearchSelectedScope { get; set; }
+    public int SortIndex { get; set; }
+    public bool SortDescending { get; set; }
+    public string[] SortOptions { get; } = ["등록 순서", "파일명", "크기", "수정일", "생성일", "경로"];
+    public AsyncCommand SearchCommand { get; }
+    public AsyncCommand ResetSearchCommand { get; }
+    public RelayCommand CopyPathCommand { get; }
+    public RelayCommand RevealFileCommand { get; }
+    public RelayCommand ReferenceFileCommand { get; }
+    public IndexedFile? SelectedFile
+    {
+        get => _selectedFile;
+        set { _selectedFile = value; Changed(); CopyPathCommand.Refresh(); RevealFileCommand.Refresh(); }
+    }
     public const int PageSize = 200;
     public ObservableCollection<DriveViewModel> Drives { get; } = [];
     public ObservableCollection<string> Folders { get; } = [];
@@ -40,13 +69,41 @@ public sealed class MainViewModel : ObservableObject
     public string? SelectedFolder { get => _selectedFolder; set { _selectedFolder = value; Changed(); RemoveFolderCommand.Refresh(); } }
 
     public MainViewModel(IDriveService drives, IIndexDatabase database, IFileIndexingService? indexing = null,
-        IScanRepository? repository = null, Func<IReadOnlyList<string>>? pickFolders = null)
+        IScanRepository? repository = null, Func<IReadOnlyList<string>>? pickFolders = null,
+        Action<string>? copyPath = null, Action<string>? revealFile = null, Func<string?>? pickReferenceFile = null)
     {
         _drives = drives;
         _database = database;
         _repository = repository ?? database as IScanRepository;
         _indexing = indexing;
+        _searchRepository = database as IFileSearchRepository;
         void Error(Exception ex) { Status = "작업 오류: " + ex.Message; }
+        SearchCommand = new(SearchAsync, Error, () => !IsBusy && _ready && _searchRepository is not null);
+        ResetSearchCommand = new(async () =>
+        {
+            NameFilter = ExtensionsFilter = MinimumSize = MaximumSize = "";
+            CreatedFrom = CreatedTo = ModifiedFrom = ModifiedTo = null;
+            SearchSelectedScope = SortDescending = false;
+            SortIndex = 0;
+            foreach (var property in new[] { nameof(NameFilter), nameof(ExtensionsFilter), nameof(MinimumSize), nameof(MaximumSize),
+                nameof(CreatedFrom), nameof(CreatedTo), nameof(ModifiedFrom), nameof(ModifiedTo), nameof(SearchSelectedScope), nameof(SortDescending), nameof(SortIndex) }) Changed(property);
+            await SearchAsync();
+        }, Error, () => !IsBusy && _ready);
+        CopyPathCommand = new(() => { try { copyPath?.Invoke(SelectedFile!.FullPath); Status = "파일 경로를 복사했습니다."; } catch (Exception ex) { Error(ex); } }, () => !IsBusy && SelectedFile is not null && copyPath is not null);
+        RevealFileCommand = new(() => { try { revealFile?.Invoke(SelectedFile!.FullPath); } catch (Exception ex) { Error(ex); } }, () => !IsBusy && SelectedFile is not null && revealFile is not null);
+        ReferenceFileCommand = new(() =>
+        {
+            try
+            {
+                var path = pickReferenceFile?.Invoke();
+                if (path is null) return;
+                NameFilter = Path.GetFileName(path);
+                ExtensionsFilter = Path.GetExtension(path);
+                Changed(nameof(NameFilter)); Changed(nameof(ExtensionsFilter));
+                Status = "기준 파일의 이름·확장자를 적용했습니다. 검색을 누르세요. 콘텐츠 중복 판정은 후속 기능입니다.";
+            }
+            catch (Exception ex) { Error(ex); }
+        }, () => !IsBusy && pickReferenceFile is not null);
         RefreshCommand = new(InitializeAsync, Error, () => !IsBusy);
         ScanCommand = new(RunScanAsync, Error, () => !IsBusy && _ready && _indexing is not null && (Drives.Any(d => d.IsSelected) || Folders.Count > 0));
         PreviousPageCommand = new(() => ChangePageAsync(-1), Error, () => !IsBusy && _page > 0);
@@ -70,6 +127,7 @@ public sealed class MainViewModel : ObservableObject
     {
         RefreshCommand.Refresh(); ScanCommand.Refresh(); PreviousPageCommand.Refresh(); NextPageCommand.Refresh();
         AddFolderCommand.Refresh(); RemoveFolderCommand.Refresh(); SelectAllDrivesCommand.Refresh(); CancelCommand.Refresh();
+        SearchCommand.Refresh(); ResetSearchCommand.Refresh(); CopyPathCommand.Refresh(); RevealFileCommand.Refresh(); ReferenceFileCommand.Refresh();
     }
 
     public async Task InitializeAsync()
@@ -82,6 +140,7 @@ public sealed class MainViewModel : ObservableObject
         {
             await _database.InitializeAsync();
             await LoadPageAsync();
+            await LoadHistoryAsync();
             var snapshots = await _drives.GetLocalDrivesAsync();
             var selected = Drives.Where(d => d.IsSelected).Select(d => d.Snapshot.RootPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
             Drives.Clear();
@@ -133,8 +192,7 @@ public sealed class MainViewModel : ObservableObject
             };
             _page = 0;
             await LoadPageAsync();
-            if (_repository is not null)
-                foreach (var issue in await _repository.GetIssuesAsync(result.ScanId)) Issues.Add(issue);
+            await LoadHistoryAsync();
         }
         catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
         {
@@ -177,10 +235,51 @@ public sealed class MainViewModel : ObservableObject
         var summary = await _database.GetSummaryAsync();
         IndexStatus = summary.FileCount == 0 ? "저장된 인덱스 없음 · 파일 0개" : $"인덱스 파일 {summary.FileCount:N0}개 (없음·접근 제한 상태 포함)";
         if (_repository is null) return;
-        var page = await _repository.GetPageAsync(_page, PageSize);
+        var page = _searchRepository is null ? await _repository.GetPageAsync(_page, PageSize)
+            : await _searchRepository.SearchAsync(_search, _page, PageSize);
         _total = page.TotalCount;
         Files.Clear();
         foreach (var file in page.Files) Files.Add(file);
-        PageText = _total == 0 ? "저장된 파일이 없습니다." : $"{_page + 1:N0} / {(_total + PageSize - 1) / PageSize:N0} 페이지 · 전체 {_total:N0}개";
+        SelectedFile = null;
+        PageText = _total == 0 ? "조건에 맞는 파일이 없습니다." : $"{_page + 1:N0} / {(_total + PageSize - 1) / PageSize:N0} 페이지 · 검색 결과 {_total:N0}개";
+    }
+
+    public async Task SearchAsync()
+    {
+        if (IsBusy || !_ready) return;
+        var roots = SearchSelectedScope ? Drives.Where(d => d.IsSelected).Select(d => d.Snapshot.RootPath).Concat(Folders).ToArray() : [];
+        if (SearchSelectedScope && roots.Length == 0) throw new ArgumentException("검색 범위로 사용할 드라이브 또는 폴더를 선택하세요.");
+        static long? Bytes(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return null;
+            if (!decimal.TryParse(input, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) || value < 0 || value > long.MaxValue / 1048576m)
+                throw new ArgumentException("크기는 0 이상의 MiB 숫자로 입력하세요.");
+            return checked((long)(value * 1048576m));
+        }
+        static DateTimeOffset? Date(DateTime? value, bool end = false) => value is { } date
+            ? new DateTimeOffset(DateTime.SpecifyKind(end ? date.Date.AddDays(1) : date.Date, DateTimeKind.Local)) : null;
+        var search = new FileSearch
+        {
+            Name = NameFilter.Trim(), Extensions = ExtensionsFilter.Split([',', ';', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            Roots = roots, MinimumBytes = Bytes(MinimumSize), MaximumBytes = Bytes(MaximumSize),
+            CreatedFrom = Date(CreatedFrom), CreatedBefore = Date(CreatedTo, true), ModifiedFrom = Date(ModifiedFrom), ModifiedBefore = Date(ModifiedTo, true),
+            Sort = (FileSort)SortIndex, Descending = SortDescending
+        };
+        search.Validate();
+        IsBusy = true;
+        try { _search = search; _page = 0; await LoadPageAsync(); SelectedTab = 1; Status = "저장 인덱스 검색 완료 · 모든 입력 조건을 함께 적용했습니다."; }
+        finally { IsBusy = false; }
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        if (_searchRepository is null || _repository is null) return;
+        var history = await _searchRepository.GetLatestScanAsync();
+        Issues.Clear();
+        if (history is null) { ProgressText = "저장된 검사 이력 없음"; return; }
+        var status = history.Status switch { "Completed" => "완료", "CompletedWithIssues" => "오류/건너뜀 포함 완료", "Cancelled" => "취소", "Interrupted" => "중단", "Running" => "검사 중", _ => "실패" };
+        var time = DateTimeOffset.Parse(history.StartedUtc, CultureInfo.InvariantCulture).ToLocalTime();
+        ProgressText = $"마지막 검사 #{history.ScanId} · {time:g} · {status}\n파일 {history.Files:N0}개 · 오류 {history.Errors:N0}개 · 건너뜀 {history.Skipped:N0}개";
+        foreach (var issue in await _repository.GetIssuesAsync(history.ScanId)) Issues.Add(issue);
     }
 }

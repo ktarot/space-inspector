@@ -11,11 +11,11 @@
         <TextBlock Text="SPACE&#x0a;INSPECTOR" Foreground="White" FontSize="23" FontWeight="Bold" />
         <TextBlock Text="내 파일을 이해하는 공간" Foreground="#BDCEE1" Margin="0,12,0,32" FontSize="12" />
         <Border Background="#2D4867" CornerRadius="6" Padding="12"><TextBlock Text="파일 인덱스" Foreground="White" FontWeight="Bold" /></Border>
-        <TextBlock Text="조건 검색 · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
+        <TextBlock Text="조건 검색 · 아래 검색 탭" Foreground="#BDCEE1" Margin="12,24,0,0" />
         <TextBlock Text="중복 검색 · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
         <TextBlock Text="OneDrive · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
         <TextBlock Text="설정 · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
-        <TextBlock Text="개발 미리보기 · Phase 2" Foreground="#BDCEE1" Margin="0,64,0,0" FontSize="11" />
+        <TextBlock Text="개발 미리보기 · Phase 3" Foreground="#BDCEE1" Margin="0,64,0,0" FontSize="11" />
         <TextBlock Text="원본 파일을 변경하지&#x0a;않습니다." Foreground="#BDCEE1" Margin="0,14,0,0" FontSize="12" />
       </StackPanel>
     </Border>
@@ -57,21 +57,45 @@
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="검사 시작 / 재검사" Command="{Binding ScanCommand}" /><Button Content="취소" Command="{Binding CancelCommand}" /></StackPanel>
         </Grid>
       </Border>
-      <TabControl Grid.Row="3" BorderThickness="0" Background="White">
+      <TabControl Grid.Row="3" BorderThickness="0" Background="White" SelectedIndex="{Binding SelectedTab}">
+        <TabItem Header="검색 조건"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="16" IsEnabled="{Binding CanEditScope}">
+          <TextBlock Text="저장 인덱스 검색 · 입력한 조건을 모두 만족하는 파일을 찾습니다." FontWeight="Bold" Margin="0,0,0,12" />
+          <WrapPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="파일명 포함" /><TextBox Width="220" Text="{Binding NameFilter, UpdateSourceTrigger=PropertyChanged}" Padding="6" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="확장자 (예: pdf, jpg, mp4)" /><TextBox Width="220" Text="{Binding ExtensionsFilter, UpdateSourceTrigger=PropertyChanged}" Padding="6" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="최소 크기 (MiB)" /><TextBox Width="120" Text="{Binding MinimumSize, UpdateSourceTrigger=PropertyChanged}" Padding="6" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="최대 크기 (MiB)" /><TextBox Width="120" Text="{Binding MaximumSize, UpdateSourceTrigger=PropertyChanged}" Padding="6" /></StackPanel>
+          </WrapPanel>
+          <WrapPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="생성일 시작" /><DatePicker Width="170" SelectedDate="{Binding CreatedFrom}" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="생성일 끝 (당일 포함)" /><DatePicker Width="170" SelectedDate="{Binding CreatedTo}" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="수정일 시작" /><DatePicker Width="170" SelectedDate="{Binding ModifiedFrom}" /></StackPanel>
+            <StackPanel Margin="0,0,16,12"><TextBlock Text="수정일 끝 (당일 포함)" /><DatePicker Width="170" SelectedDate="{Binding ModifiedTo}" /></StackPanel>
+          </WrapPanel>
+          <WrapPanel Margin="0,0,0,14">
+            <CheckBox Content="위에서 선택한 드라이브·폴더로 검색 범위 제한" IsChecked="{Binding SearchSelectedScope}" VerticalAlignment="Center" Margin="0,0,20,8" />
+            <ComboBox Width="120" ItemsSource="{Binding SortOptions}" SelectedIndex="{Binding SortIndex}" Margin="0,0,12,8" />
+            <CheckBox Content="내림차순" IsChecked="{Binding SortDescending}" VerticalAlignment="Center" Margin="0,0,0,8" />
+          </WrapPanel>
+          <WrapPanel><Button Content="검색 적용" Command="{Binding SearchCommand}" /><Button Content="조건 초기화" Command="{Binding ResetSearchCommand}" /><Button Content="기준 파일 선택" Command="{Binding ReferenceFileCommand}" /></WrapPanel>
+          <TextBlock Text="검색 후 ‘저장된 파일’ 탭에서 결과를 확인하세요. 기준 파일은 이름·확장자를 가져오며 콘텐츠 중복 여부는 아직 판정하지 않습니다. 날짜는 이 PC의 현지 날짜를 기준으로 합니다." TextWrapping="Wrap" Margin="0,14,0,0" Foreground="#596B80" />
+        </StackPanel></ScrollViewer></TabItem>
         <TabItem Header="저장된 파일"><Grid Margin="12">
-          <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-          <DataGrid ItemsSource="{Binding Files}" SelectionMode="Single">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <WrapPanel Margin="0,0,0,10"><Button Content="경로 복사" Command="{Binding CopyPathCommand}" /><Button Content="탐색기에서 위치 열기" Command="{Binding RevealFileCommand}" /><TextBlock Text="정상 = 메타데이터 수집 성공" Foreground="#596B80" VerticalAlignment="Center" /></WrapPanel>
+          <DataGrid Grid.Row="1" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}" SelectionMode="Single">
             <DataGrid.Columns>
               <DataGridTextColumn Header="파일명" Binding="{Binding FileName}" Width="180" />
               <DataGridTextColumn Header="실제 경로" Binding="{Binding FullPath}" Width="*" MinWidth="180" />
               <DataGridTextColumn Header="크기 (바이트)" Binding="{Binding FileSize, StringFormat=N0}" Width="105" />
+              <DataGridTextColumn Header="수정 시각 (UTC)" Binding="{Binding ModifiedTimeUtc}" Width="160" />
               <DataGridTextColumn Header="상태" Binding="{Binding StatusText}" Width="125" />
               <DataGridTextColumn Header="클라우드 속성" Binding="{Binding CloudText}" Width="145" />
             </DataGrid.Columns>
           </DataGrid>
-          <DockPanel Grid.Row="1" Margin="0,12,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="이전" Command="{Binding PreviousPageCommand}" /><Button Content="다음" Command="{Binding NextPageCommand}" /></StackPanel><TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Foreground="#596B80" /></DockPanel>
+          <DockPanel Grid.Row="2" Margin="0,12,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="이전" Command="{Binding PreviousPageCommand}" /><Button Content="다음" Command="{Binding NextPageCommand}" /></StackPanel><TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Foreground="#596B80" /></DockPanel>
         </Grid></TabItem>
-        <TabItem Header="이번 검사 오류 / 건너뜀"><DockPanel Margin="12">
+        <TabItem Header="마지막 검사 오류 / 건너뜀"><DockPanel Margin="12">
           <TextBlock DockPanel.Dock="Top" Text="최대 100개 표시 · 전체 기록은 로컬 DB에 저장됩니다. 링크·클라우드 폴더·앱 폴더는 건너뜁니다." TextWrapping="Wrap" Margin="0,0,0,12" Foreground="#596B80" />
           <DataGrid ItemsSource="{Binding Issues}"><DataGrid.Columns><DataGridTextColumn Header="경로" Binding="{Binding Path}" Width="2*" /><DataGridTextColumn Header="상태" Binding="{Binding Status}" Width="130" /><DataGridTextColumn Header="내용" Binding="{Binding Message}" Width="2*" /></DataGrid.Columns></DataGrid>
         </DockPanel></TabItem>

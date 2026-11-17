@@ -28,8 +28,10 @@ public class WindowSmokeTests
             try
             {
                 var database = new SqliteIndexDatabase(Path.Combine(directory, "index.db"));
+                string? copied = null, revealed = null;
                 var model = new MainViewModel(new FixtureDrives(), database,
-                    new FileIndexingService(new FixtureFiles(), database), database, () => [@"X:\Example"]);
+                    new FileIndexingService(new FixtureFiles(), database), database, () => [@"X:\Example"],
+                    path => copied = path, path => revealed = path, () => @"X:\Example\보고서.pdf");
                 window = new MainWindow(model) { ShowActivated = false, ShowInTaskbar = false, Left = -10000, Top = -10000 };
                 window.Show();
                 var deadline = DateTime.UtcNow.AddSeconds(15);
@@ -58,6 +60,30 @@ public class WindowSmokeTests
                 Assert.Equal(3, model.Files.Count);
                 Assert.False(model.CancelCommand.CanExecute(null));
                 Assert.Equal(3, new SqliteIndexDatabase(Path.Combine(directory, "index.db")).GetSummaryAsync().GetAwaiter().GetResult().FileCount);
+                model.ReferenceFileCommand.Execute(null);
+                Assert.Equal("보고서.pdf", model.NameFilter);
+                model.SearchCommand.Execute(null);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (model.IsBusy && DateTime.UtcNow < deadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                    Thread.Sleep(10);
+                }
+                Assert.Single(model.Files);
+                model.SelectedFile = model.Files[0];
+                model.CopyPathCommand.Execute(null);
+                model.RevealFileCommand.Execute(null);
+                Assert.Equal(model.Files[0].FullPath, copied);
+                Assert.Equal(copied, revealed);
+                model.RefreshCommand.Execute(null);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (model.IsBusy && DateTime.UtcNow < deadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
+                    Thread.Sleep(10);
+                }
+                Assert.Contains("마지막 검사", model.ProgressText);
+                Assert.Contains("fixture denial", model.Issues.Select(i => i.Message));
                 window.UpdateLayout();
                 var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(window);
@@ -68,6 +94,17 @@ public class WindowSmokeTests
                     var encoder = new PngBitmapEncoder();
                     encoder.Frames.Add(BitmapFrame.Create(bitmap));
                     using var stream = File.Create(output);
+                    encoder.Save(stream);
+                }
+                model.SelectedTab = 0;
+                window.UpdateLayout();
+                if (!string.IsNullOrWhiteSpace(output))
+                {
+                    var conditions = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                    conditions.Render(window);
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(conditions));
+                    using var stream = File.Create(Path.ChangeExtension(output, "search.png"));
                     encoder.Save(stream);
                 }
             }
@@ -107,6 +144,7 @@ public class WindowSmokeTests
             foreach (var name in new[] { "보고서.pdf", "여행 사진.jpg", "프로젝트.zip" })
                 yield return new(new FileMetadata(Path.Combine(roots[0], name), name, Path.GetExtension(name), roots[0],
                     @"X:\", 1024, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, false), null);
+            yield return new(null, new(Path.Combine(roots[0], "denied"), "AccessDenied", "fixture denial"));
         }
     }
 }
