@@ -6,7 +6,7 @@ using System.IO;
 
 namespace SpaceInspector.App.ViewModels;
 
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject
 {
     private readonly IDriveService _drives;
     private readonly IIndexDatabase _database;
@@ -18,7 +18,7 @@ public sealed class MainViewModel : ObservableObject
     private Task<IndexPage>? _queryTask;
     private bool _searching;
     public bool IsSearching { get => _searching; private set { _searching = value; Changed(); Changed(nameof(IsWorking)); CancelCommand.Refresh(); } }
-    public bool IsWorking => IsScanning || IsSearching;
+    public bool IsWorking => IsScanning || IsSearching || IsAnalyzing;
     private string _status = "초기화 준비 중", _indexStatus = "인덱스 확인 중", _progressText = "검사 대기 중", _pageText = "";
     private bool _busy, _scanning, _ready;
     private int _page;
@@ -75,7 +75,8 @@ public sealed class MainViewModel : ObservableObject
 
     public MainViewModel(IDriveService drives, IIndexDatabase database, IFileIndexingService? indexing = null,
         IScanRepository? repository = null, Func<IReadOnlyList<string>>? pickFolders = null,
-        Action<string>? copyPath = null, Action<string>? revealFile = null, Func<string?>? pickReferenceFile = null)
+        Action<string>? copyPath = null, Action<string>? revealFile = null, Func<string?>? pickReferenceFile = null,
+        IDuplicateAnalysisService? duplicates = null, IDuplicateRepository? duplicateRepository = null, Func<IndexedFile, bool>? validateDevice = null)
     {
         _drives = drives;
         _database = database;
@@ -95,7 +96,7 @@ public sealed class MainViewModel : ObservableObject
             await SearchAsync();
         }, Error, () => !IsBusy && _ready);
         CopyPathCommand = new(() => { try { copyPath?.Invoke(SelectedFile!.FullPath); Status = "파일 경로를 복사했습니다."; } catch (Exception ex) { Error(ex); } }, () => !IsBusy && SelectedFile is not null && copyPath is not null);
-        RevealFileCommand = new(() => { try { revealFile?.Invoke(SelectedFile!.FullPath); } catch (Exception ex) { Error(ex); } }, () => !IsBusy && SelectedFile is not null && revealFile is not null);
+        RevealFileCommand = new(() => { try { if (validateDevice is not null && !validateDevice(SelectedFile!)) throw new IOException("원래 장치를 확인할 수 없습니다. 연결을 확인하고 해당 범위를 재검사하세요."); revealFile?.Invoke(SelectedFile!.FullPath); } catch (Exception ex) { Error(ex); } }, () => !IsBusy && SelectedFile is not null && revealFile is not null);
         ReferenceFileCommand = new(() =>
         {
             try
@@ -114,7 +115,8 @@ public sealed class MainViewModel : ObservableObject
         PreviousPageCommand = new(() => ChangePageAsync(-1), Error, () => !IsBusy && _page > 0);
         NextPageCommand = new(() => ChangePageAsync(1), Error, () => !IsBusy && ((long)_page + 1) * PageSize < _total);
         CancelCommand = new(CancelScan, () => (IsScanning && _cancellation?.IsCancellationRequested == false)
-            || (IsSearching && _queryCancellation?.IsCancellationRequested == false));
+            || (IsSearching && _queryCancellation?.IsCancellationRequested == false)
+            || (IsAnalyzing && _duplicateCancellation?.IsCancellationRequested == false));
         AddFolderCommand = new(() =>
         {
             try
@@ -127,6 +129,7 @@ public sealed class MainViewModel : ObservableObject
         RemoveFolderCommand = new(() => { if (SelectedFolder is { } folder) Folders.Remove(folder); }, () => !IsBusy && SelectedFolder is not null);
         SelectAllDrivesCommand = new(() => { foreach (var drive in Drives) drive.IsSelected = drive.Snapshot.IsReady; }, () => !IsBusy);
         Folders.CollectionChanged += (_, _) => ScanCommand.Refresh();
+        ConfigureDuplicates(duplicates, duplicateRepository ?? database as IDuplicateRepository);
     }
 
     private void RefreshCommands()
@@ -134,6 +137,7 @@ public sealed class MainViewModel : ObservableObject
         RefreshCommand.Refresh(); ScanCommand.Refresh(); PreviousPageCommand.Refresh(); NextPageCommand.Refresh();
         AddFolderCommand.Refresh(); RemoveFolderCommand.Refresh(); SelectAllDrivesCommand.Refresh(); CancelCommand.Refresh();
         SearchCommand.Refresh(); ResetSearchCommand.Refresh(); CopyPathCommand.Refresh(); RevealFileCommand.Refresh(); ReferenceFileCommand.Refresh();
+        RefreshDuplicateCommands();
     }
 
     public async Task InitializeAsync()
@@ -147,6 +151,7 @@ public sealed class MainViewModel : ObservableObject
             await _database.InitializeAsync();
             await LoadPageAsync();
             await LoadHistoryAsync();
+            await LoadDuplicateGroupsAsync();
             var snapshots = await _drives.GetLocalDrivesAsync();
             var selected = Drives.Where(d => d.IsSelected).Select(d => d.Snapshot.RootPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
             Drives.Clear();
@@ -197,126 +202,203 @@ public sealed class MainViewModel : ObservableObject
             {
                 "Cancelled" => "검사를 취소했습니다. 저장된 결과는 유지하며, 미검사 파일을 없음으로 처리하지 않습니다.",
                 "Completed" => "검사가 완료되었습니다. 같은 범위로 다시 검사하면 인덱스를 갱신합니다.",
-                "CompletedWithIssues" => "검사 완료 · 오류/건너뜀 경로를 확인하세요. 해당 영역의 기존 인덱스는 보존합니다.",
-                _ => "검사 실패 · 저장된 결과는 보존했습니다. 오류 기록을 확인하세요."
-            };
-            await LoadPageAsync(pageNumber: 0);
-            await LoadHistoryAsync();
-        }
-        catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
+                "CompletedWithIssues" => "검사 완료 · 오류/건너뜀 경로를 확인하세요…16002 tokens truncated…tus='Running';";
+        if (Convert.ToInt64(command.ExecuteScalar()) > 0) throw new InvalidOperationException("진행 중인 검사가 있습니다.");
+        command.CommandText = "INSERT INTO ScanRuns(StartedUtc,Status) VALUES($now,'Running'); SELECT last_insert_rowid();";
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        var id = Convert.ToInt64(command.ExecuteScalar());
+        foreach (var root in roots)
         {
-            Status = "검사를 취소했습니다. 기존 인덱스는 유지됩니다.";
+            var volume = _volumes?.GetIdentity(root);
+            if (volume is not null) RegisterVolume(command, volume, Path.GetPathRoot(root)!);
+            command.Parameters.Clear();
+            command.CommandText = "INSERT INTO ScanScopes(ScanId,RootPath,PathPrefix,VolumeIdentifier) VALUES($id,$root,$prefix,$volume);";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$root", root);
+            command.Parameters.AddWithValue("$prefix", ScanScope.Prefix(root));
+            command.Parameters.AddWithValue("$volume", (object?)volume ?? DBNull.Value);
+            command.ExecuteNonQuery();
         }
-        catch (OperationCanceledException) { Status = "검사 후 결과 조회를 취소했습니다. 검사 기록과 인덱스는 저장되어 있습니다."; }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "검사 오류: " + ex.Message; }
-        finally
+        cancellationToken.ThrowIfCancellationRequested();
+        transaction.Commit();
+        return id;
+    }, cancellationToken);
+
+    public Task AppendAsync(long scanId, IReadOnlyList<ScanObservation> batch, CancellationToken cancellationToken) => Task.Run(() =>
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        foreach (var observation in batch)
         {
-            IsScanning = false;
-            _scanTask = null;
-            _cancellation.Dispose();
-            _cancellation = null;
-            IsBusy = false;
+            cancellationToken.ThrowIfCancellationRequested();
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("$id", scanId);
+            if (observation.File is { } file)
+            {
+                if (file.VolumeIdentifier is not null)
+                {
+                    command.CommandText = "SELECT COUNT(*) FROM ScanScopes WHERE ScanId=$id AND VolumeIdentifier=$volume";
+                    command.Parameters.AddWithValue("$volume", file.VolumeIdentifier);
+                    if (Convert.ToInt64(command.ExecuteScalar()) == 0) throw new IOException("검사 시작 이후 장치 식별자가 달라졌습니다. 다시 검사하세요.");
+                    command.Parameters.RemoveAt("$volume");
+                }
+                var key = file.VolumeIdentifier is null ? "path|" + file.FullPath : "volume|" + file.VolumeIdentifier + "|" + file.VolumeRelativePath;
+                if (file.VolumeIdentifier is not null)
+                {
+                    command.CommandText = "UPDATE Files SET IndexKey=$key WHERE VolumeIdentifier IS NULL AND FullPath=$path COLLATE NOCASE AND NOT EXISTS(SELECT 1 FROM Files WHERE IndexKey=$key);";
+                    command.Parameters.AddWithValue("$key", key);
+                    command.Parameters.AddWithValue("$path", file.FullPath);
+                    command.ExecuteNonQuery();
+                    command.Parameters.Clear();
+                    command.Parameters.AddWithValue("$id", scanId);
+                }
+                command.CommandText = """
+                    INSERT INTO Files(FullPath,FileName,Extension,ParentDirectory,Drive,FileSize,CreationTimeUtc,
+                        ModifiedTimeUtc,Attributes,IsCloudPlaceholder,ScanTimeUtc,ScanStatus,LastSeenScanId,IndexKey,VolumeIdentifier,VolumeRelativePath)
+                    VALUES($path,$name,$ext,$parent,$drive,$size,$created,$modified,$attrs,$cloud,$now,'Normal',$id,$key,$volume,$relative)
+                    ON CONFLICT(IndexKey) DO UPDATE SET FullPath=excluded.FullPath,FileName=excluded.FileName,Extension=excluded.Extension,
+                        ParentDirectory=excluded.ParentDirectory,Drive=excluded.Drive,FileSize=excluded.FileSize,
+                        CreationTimeUtc=excluded.CreationTimeUtc,ModifiedTimeUtc=excluded.ModifiedTimeUtc,
+                        Attributes=excluded.Attributes,IsCloudPlaceholder=excluded.IsCloudPlaceholder,
+                        ScanTimeUtc=excluded.ScanTimeUtc,ScanStatus='Normal',ScanError=NULL,LastSeenScanId=$id,
+                        VolumeIdentifier=excluded.VolumeIdentifier,VolumeRelativePath=excluded.VolumeRelativePath,
+                        FileSystemIdentifier=NULL,DuplicateRunId=NULL,DuplicateError=NULL,
+                        PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified';
+                    """;
+                command.Parameters.AddWithValue("$path", file.FullPath);
+                command.Parameters.AddWithValue("$name", file.FileName);
+                command.Parameters.AddWithValue("$ext", file.Extension);
+                command.Parameters.AddWithValue("$parent", file.ParentDirectory);
+                command.Parameters.AddWithValue("$drive", file.Drive);
+                command.Parameters.AddWithValue("$size", file.FileSize);
+                command.Parameters.AddWithValue("$created", file.CreationTimeUtc.ToString("O"));
+                command.Parameters.AddWithValue("$modified", file.ModifiedTimeUtc.ToString("O"));
+                command.Parameters.AddWithValue("$attrs", file.Attributes);
+                command.Parameters.AddWithValue("$cloud", file.IsCloudPlaceholder is { } cloud ? (cloud ? 1 : 0) : DBNull.Value);
+                command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+                command.Parameters.AddWithValue("$key", key);
+                command.Parameters.AddWithValue("$volume", (object?)file.VolumeIdentifier ?? DBNull.Value);
+                command.Parameters.AddWithValue("$relative", (object?)file.VolumeRelativePath ?? DBNull.Value);
+            }
+            else if (observation.Issue is { } issue)
+            {
+                command.CommandText = "INSERT INTO ScanIssues(ScanId,Path,PathPrefix,Status,Message) VALUES($id,$path,$prefix,$status,$message);";
+                command.Parameters.AddWithValue("$path", issue.Path);
+                command.Parameters.AddWithValue("$prefix", ScanScope.Prefix(issue.Path));
+                command.Parameters.AddWithValue("$status", issue.Status);
+                command.Parameters.AddWithValue("$message", issue.Message);
+            }
+            else continue;
+            command.ExecuteNonQuery();
         }
-    }
+        cancellationToken.ThrowIfCancellationRequested();
+        transaction.Commit();
+    }, cancellationToken);
 
-    public void CancelScan()
+    public Task FinishScanAsync(ScanResult result, CancellationToken cancellationToken) => Task.Run(() =>
     {
-        if (IsScanning) _cancellation?.Cancel();
-        _queryCancellation?.Cancel();
-        CancelCommand.Refresh();
-        Status = IsSearching ? "검색 취소 요청 · 조회를 중단하는 중입니다." : "취소 요청 · 현재 메타데이터 작업과 저장을 마치는 중입니다.";
-    }
-
-    public async Task CancelAndWaitAsync()
-    {
-        CancelScan();
-        if (_scanTask is not null) { try { await _scanTask; } catch (Exception) { /* RunScanAsync displays the failure. */ } }
-        if (_queryTask is not null) { try { await _queryTask; } catch (Exception) { /* Query owner displays the failure. */ } }
-    }
-
-    private async Task ChangePageAsync(int direction)
-    {
-        if (IsBusy) return;
-        IsBusy = true;
-        try { await LoadPageAsync(pageNumber: Math.Max(0, _page + direction)); }
-        catch (OperationCanceledException) { Status = "페이지 조회를 취소했습니다. 이전 결과를 유지합니다."; }
-        finally { IsBusy = false; }
-    }
-
-    private async Task LoadPageAsync(FileSearch? requestedSearch = null, int? pageNumber = null)
-    {
-        var summary = await _database.GetSummaryAsync();
-        IndexStatus = summary.FileCount == 0 ? "저장된 인덱스 없음 · 파일 0개" : $"인덱스 파일 {summary.FileCount:N0}개 (없음·접근 제한 상태 포함)";
-        if (_repository is null) return;
-        var query = requestedSearch ?? _search;
-        var requestedPage = pageNumber ?? _page;
-        _queryCancellation = new();
-        var token = _queryCancellation.Token;
-        IsSearching = true;
-        var previousStatus = Status;
-        Status = "저장 인덱스 검색 중 · 오래 걸리면 취소를 누르세요.";
-        IndexPage page;
-        try
+        cancellationToken.ThrowIfCancellationRequested();
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$id", result.ScanId);
+        // A successful walk can reconcile only within selected scopes, excluding every inaccessible/skipped subtree.
+        // substr + NOCASE avoids LIKE wildcard surprises in folder names such as "100%_done".
+        if (result.Status is "Completed" or "CompletedWithIssues")
         {
-            _queryTask = _searchRepository is null ? _repository.GetPageAsync(requestedPage, PageSize, token)
-                : _searchRepository.SearchAsync(query, requestedPage, PageSize, token);
-            page = await _queryTask;
-            token.ThrowIfCancellationRequested();
-            Status = previousStatus;
+            command.CommandText = """
+                UPDATE Files SET ScanStatus='Missing', PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified'
+                WHERE (LastSeenScanId IS NULL OR LastSeenScanId <> $id)
+                AND EXISTS (SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id
+                    AND (Files.VolumeIdentifier=s.VolumeIdentifier OR (Files.VolumeIdentifier IS NULL AND s.VolumeIdentifier IS NULL))
+                    AND substr(Files.FullPath,1,length(s.PathPrefix))=s.PathPrefix COLLATE NOCASE)
+                AND NOT EXISTS (SELECT 1 FROM ScanIssues i WHERE i.ScanId=$id
+                    AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
+                """;
+            command.ExecuteNonQuery();
         }
-        finally
-        {
-            IsSearching = false;
-            _queryTask = null;
-            _queryCancellation.Dispose();
-            _queryCancellation = null;
-        }
-        _search = query;
-        _page = requestedPage;
-        _total = page.TotalCount;
-        Files.Clear();
-        foreach (var file in page.Files) Files.Add(file);
-        SelectedFile = null;
-        PageText = _total == 0 ? "조건에 맞는 파일이 없습니다." : $"{_page + 1:N0} / {(_total + PageSize - 1) / PageSize:N0} 페이지 · 검색 결과 {_total:N0}개";
-    }
+        command.CommandText = """
+            UPDATE Files SET ScanStatus='NeedsRescan',DuplicateStatus='Unverified',PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL
+                WHERE EXISTS (SELECT 1 FROM ScanIssues i WHERE i.ScanId=$id
+                AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
+                AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
+            UPDATE Files SET ScanStatus='AccessDenied' WHERE EXISTS (SELECT 1 FROM ScanIssues i
+                WHERE i.ScanId=$id AND i.Status='AccessDenied'
+                AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
+                AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
+            UPDATE Files SET ScanStatus='DeviceUnavailable' WHERE EXISTS (SELECT 1 FROM ScanIssues i
+                WHERE i.ScanId=$id AND i.Status='Unavailable'
+                AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
+                AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
+            UPDATE ScanRuns SET FinishedUtc=$now,Status=$status,FileCount=$files,ErrorCount=$errors,SkippedCount=$skipped WHERE ScanId=$id;
+            """;
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        command.Parameters.AddWithValue("$status", result.Status);
+        command.Parameters.AddWithValue("$files", result.Files);
+        command.Parameters.AddWithValue("$errors", result.Errors);
+        command.Parameters.AddWithValue("$skipped", result.Skipped);
+        command.ExecuteNonQuery();
+        transaction.Commit();
+    }, cancellationToken);
 
-    public async Task SearchAsync()
+    public Task<IndexPage> GetPageAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Task.Run(() =>
     {
-        if (IsBusy || !_ready) return;
-        var roots = SearchSelectedScope ? Drives.Where(d => d.IsSelected).Select(d => d.Snapshot.RootPath).Concat(Folders).ToArray() : [];
-        if (SearchSelectedScope && roots.Length == 0) throw new ArgumentException("검색 범위로 사용할 드라이브 또는 폴더를 선택하세요.");
-        static long? Bytes(string input)
+        ArgumentOutOfRangeException.ThrowIfNegative(pageNumber);
+        if (pageSize is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(pageSize));
+        cancellationToken.ThrowIfCancellationRequested();
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT COUNT(*) FROM Files;";
+        var count = Convert.ToInt64(command.ExecuteScalar());
+        command.CommandText = "SELECT FileId,FileName,FullPath,FileSize,ModifiedTimeUtc,ScanStatus,IsCloudPlaceholder,VolumeIdentifier FROM Files ORDER BY FileId LIMIT $limit OFFSET $offset;";
+        command.Parameters.AddWithValue("$limit", pageSize);
+        command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
+        using var reader = command.ExecuteReader();
+        var files = new List<IndexedFile>(pageSize);
+        while (reader.Read())
         {
-            if (string.IsNullOrWhiteSpace(input)) return null;
-            if (!decimal.TryParse(input, NumberStyles.Number, CultureInfo.CurrentCulture, out var value) || value < 0 || value > long.MaxValue / 1048576m)
-                throw new ArgumentException("크기는 0 이상의 MiB 숫자로 입력하세요.");
-            return checked((long)(value * 1048576m));
+            cancellationToken.ThrowIfCancellationRequested();
+            files.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6), reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
-        static DateTimeOffset? Date(DateTime? value, bool end = false) => value is { } date
-            ? new DateTimeOffset(DateTime.SpecifyKind(end ? date.Date.AddDays(1) : date.Date, DateTimeKind.Local)) : null;
-        var search = new FileSearch
-        {
-            Name = NameFilter.Trim(), Extensions = ExtensionsFilter.Split([',', ';', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            Roots = roots, MinimumBytes = Bytes(MinimumSize), MaximumBytes = Bytes(MaximumSize),
-            CreatedFrom = Date(CreatedFrom), CreatedBefore = Date(CreatedTo, true), ModifiedFrom = Date(ModifiedFrom), ModifiedBefore = Date(ModifiedTo, true),
-            Sort = (FileSort)SortIndex, Descending = SortDescending
-        };
-        search.Validate();
-        IsBusy = true;
-        try { await LoadPageAsync(search, 0); SelectedTab = 1; Status = "저장 인덱스 검색 완료 · 모든 입력 조건을 함께 적용했습니다."; }
-        catch (OperationCanceledException) { Status = "검색을 취소했습니다. 이전 결과와 저장된 인덱스를 유지합니다."; }
-        finally { IsBusy = false; }
-    }
+        return new IndexPage(files, count, pageNumber, pageSize);
+    }, cancellationToken);
 
-    private async Task LoadHistoryAsync()
+    public Task<IReadOnlyList<ScanIssue>> GetIssuesAsync(long scanId, int limit = 100, CancellationToken cancellationToken = default)
+        => Task.Run<IReadOnlyList<ScanIssue>>(() =>
     {
-        if (_searchRepository is null || _repository is null) return;
-        var history = await _searchRepository.GetLatestScanAsync();
-        Issues.Clear();
-        if (history is null) { ProgressText = "저장된 검사 이력 없음"; return; }
-        var status = history.Status switch { "Completed" => "완료", "CompletedWithIssues" => "오류/건너뜀 포함 완료", "Cancelled" => "취소", "Interrupted" => "중단", "Running" => "검사 중", _ => "실패" };
-        var time = DateTimeOffset.Parse(history.StartedUtc, CultureInfo.InvariantCulture).ToLocalTime();
-        ProgressText = $"마지막 검사 #{history.ScanId} · {time:g} · {status}\n파일 {history.Files:N0}개 · 오류 {history.Errors:N0}개 · 건너뜀 {history.Skipped:N0}개";
-        foreach (var issue in await _repository.GetIssuesAsync(history.ScanId)) Issues.Add(issue);
+        if (limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit));
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Path,Status,Message FROM ScanIssues WHERE ScanId=$id ORDER BY IssueId LIMIT $limit;";
+        command.Parameters.AddWithValue("$id", scanId);
+        command.Parameters.AddWithValue("$limit", limit);
+        using var reader = command.ExecuteReader();
+        var issues = new List<ScanIssue>();
+        while (reader.Read()) { cancellationToken.ThrowIfCancellationRequested(); issues.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2))); }
+        return issues;
+    }, cancellationToken);
+
+    private static void RegisterVolume(SqliteCommand command, string identity, string root)
+    {
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue("$volume", identity);
+        command.Parameters.AddWithValue("$root", root);
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+        command.CommandText = """
+            UPDATE Files SET ScanStatus='DeviceUnavailable',DuplicateStatus='Unverified',FullHash=NULL,PartialHash=NULL,DuplicateGroupId=NULL
+                WHERE Drive=$root COLLATE NOCASE AND VolumeIdentifier IS NOT NULL AND VolumeIdentifier<>$volume;
+            UPDATE Files SET FullPath=$root || VolumeRelativePath,
+                ParentDirectory=$root || substr(VolumeRelativePath,1,length(VolumeRelativePath)-length(FileName)-1),
+                Drive=$root,ScanStatus='NeedsRescan',DuplicateStatus='Unverified',FullHash=NULL,PartialHash=NULL,DuplicateGroupId=NULL
+                WHERE VolumeIdentifier=$volume AND Drive<>$root COLLATE NOCASE AND VolumeRelativePath IS NOT NULL;
+            INSERT INTO Volumes VALUES($volume,$root,$now) ON CONFLICT(VolumeIdentifier) DO UPDATE SET RootPath=$root,LastSeenUtc=$now;
+            """;
+        command.ExecuteNonQuery();
     }
 }

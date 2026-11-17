@@ -260,10 +260,10 @@ public sealed class IndexingTests : IDisposable
         var db = await Database();
         Write("keep.txt");
         await Scanner(db).ScanAsync([Root]);
-        Execute("DROP INDEX IX_Files_LastSeen; ALTER TABLE Files DROP COLUMN LastSeenScanId; ALTER TABLE ScanRuns DROP COLUMN SkippedCount; PRAGMA user_version=1;");
+        Execute("DROP INDEX IX_Files_LastSeen; DROP INDEX IX_Files_IndexKey; ALTER TABLE Files DROP COLUMN IndexKey; ALTER TABLE Files DROP COLUMN VolumeRelativePath; ALTER TABLE Files DROP COLUMN DuplicateRunId; ALTER TABLE Files DROP COLUMN DuplicateError; ALTER TABLE Files DROP COLUMN LastSeenScanId; ALTER TABLE ScanRuns DROP COLUMN SkippedCount; ALTER TABLE ScanScopes DROP COLUMN VolumeIdentifier; DROP TABLE Volumes; DROP TABLE DuplicateRuns; DROP TABLE DuplicateWork; PRAGMA user_version=1;");
         await db.InitializeAsync();
         Assert.Equal(1, (await db.GetSummaryAsync()).FileCount);
-        Assert.Equal(2L, Scalar("PRAGMA user_version"));
+        Assert.Equal(3L, Scalar("PRAGMA user_version"));
         await Scanner(db).ScanAsync([Root]);
     }
 

@@ -10,6 +10,7 @@ using SpaceInspector.Core.Interfaces;
 using SpaceInspector.Core.Models;
 using SpaceInspector.Infrastructure.Database;
 using SpaceInspector.Core.Indexing;
+using SpaceInspector.Core.DuplicateDetection;
 using Xunit;
 
 namespace SpaceInspector.UnitTests;
@@ -31,7 +32,8 @@ public class WindowSmokeTests
                 string? copied = null, revealed = null;
                 var model = new MainViewModel(new FixtureDrives(), database,
                     new FileIndexingService(new FixtureFiles(), database), database, () => [@"X:\Example"],
-                    path => copied = path, path => revealed = path, () => @"X:\Example\보고서.pdf");
+                    path => copied = path, path => revealed = path, () => @"X:\Example\보고서.pdf",
+                    duplicates: new DuplicateAnalysisService(database, new FixtureFingerprints()), duplicateRepository: database);
                 window = new MainWindow(model) { ShowActivated = false, ShowInTaskbar = false, Left = -10000, Top = -10000 };
                 window.Show();
                 var deadline = DateTime.UtcNow.AddSeconds(15);
@@ -84,6 +86,22 @@ public class WindowSmokeTests
                 }
                 Assert.Contains("마지막 검사", model.ProgressText);
                 Assert.Contains("fixture denial", model.Issues.Select(i => i.Message));
+                model.AnalyzeDuplicatesCommand.Execute(null);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (model.IsBusy && DateTime.UtcNow < deadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background); Thread.Sleep(10);
+                }
+                Assert.False(model.IsBusy);
+                Assert.Equal("ConfirmedDuplicate", Assert.Single(model.DuplicateGroups).Status);
+                model.SelectedDuplicateGroup = model.DuplicateGroups[0];
+                model.LoadDuplicateMembersCommand.Execute(null);
+                deadline = DateTime.UtcNow.AddSeconds(15);
+                while (model.IsBusy && DateTime.UtcNow < deadline)
+                {
+                    window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background); Thread.Sleep(10);
+                }
+                Assert.Equal(3, model.DuplicateMembers.Count);
                 window.UpdateLayout();
                 var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(window);
@@ -146,5 +164,11 @@ public class WindowSmokeTests
                     @"X:\", 1024, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, false), null);
             yield return new(null, new(Path.Combine(roots[0], "denied"), "AccessDenied", "fixture denial"));
         }
+    }
+    private sealed class FixtureFingerprints : IFileFingerprintService
+    {
+        public Task<FileFingerprint> ComputeAsync(DuplicateCandidate file, DuplicateLevel level, bool includeProtected, CancellationToken cancellationToken)
+            => Task.FromResult(new FileFingerprint("Verified", "FIXTURE-HASH", "physical-" + file.FileId));
+        public Task<bool> IsCurrentAsync(DuplicateCandidate file, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }

@@ -27,3 +27,15 @@ COUNT와 페이지 조회는 같은 읽기 트랜잭션을 사용합니다. 모�
 클립보드, 파일 선택, Explorer 호출은 앱 구성에서 주입하며 테스트에서 OS 동작을 대체합니다. 기준 파일 선택은 이름·확장자만 가져오며 파일 콘텐츠를 읽지 않습니다. 파일 상세 권한, 분류/시스템 포함 필터, 미디어 길이는 이후 Phase의 분석 결과와 연결합니다.
 
 조회 취소는 검사 취소와 별도 토큰을 사용합니다. Microsoft.Data.Sqlite의 Command.Cancel은 실행을 중단하지 않으므로 `SqliteQueryCancellation`에서 [SQLite progress handler](https://www.sqlite.org/c3ref/progress_handler.html)를 등록해 1000 VM 명령마다 취소를 확인합니다. SQLITE_INTERRUPT는 토큰이 취소된 경우 OperationCanceledException으로 바꿉니다. 읽기 트랜잭션을 해제하기 전에 핸들러를 제거합니다. UI는 성공한 조회만 결과와 적용 조건/페이지에 반영합니다.
+
+## 볼륨 식별 및 중복 분석
+
+스키마 v3는 v1/v2를 SQLite 백업 API로 같은 데이터 폴더에 보존한 후 트랜잭션으로 마이그레이션합니다. FullPath 유일 제약을 제거하고 IndexKey에 `volume|식별자|상대경로`를 저장합니다. 식별 전 데이터는 `path|기존경로` 키를 유지하며, 실제 관찰한 항목부터 새 키로 연결합니다. 같은 문자를 다른 장치가 사용해도 이전 행은 DeviceUnavailable로 보존합니다. 같은 볼륨의 문자 변경은 해당 볼륨 행만 경로/드라이브를 재매핑하고 미확인 항목은 NeedsRescan으로 표시합니다. 스캔 범위에도 볼륨을 기록해 다른 장치의 항목을 Missing으로 처리하지 않습니다.
+
+볼륨 식별은 GetVolumeNameForVolumeMountPointW의 GUID, GetVolumeInformationW의 일련번호와 파일 시스템을 결합합니다. 현재는 검사 시작 때 장치를 등록하고 디렉터리 순회 중 변경을 확인합니다. 실시간 재연결 감시는 후속입니다.
+
+Core의 DuplicateAnalysisService가 IDuplicateRepository와 IFileFingerprintService를 조정합니다. DuplicateWork에 크기 후보를 한 번 구성하고, 페이지별 부분 해시 → 부분 일치 후보의 전체 해시 → 게시 전 재확인을 수행합니다. 중복 SQL 상태는 Unverified, SuspectedDuplicate, StrongCandidate, ConfirmedDuplicate, NotDuplicate로 구분합니다. 취소/실패 시 확정 그룹을 게시하지 않습니다. 진행 표시는 처리 횟수이며 부분/전체를 각각 센 값입니다.
+
+콘텐츠 서비스는 UI 스레드 밖에서 순차 실행합니다. 볼륨 확인, 상위 디렉터리의 reparse/회수 속성 검사, 대상 속성 검사를 거쳐 OPEN_REPARSE_POINT/OPEN_NO_RECALL, 읽기 전용·쓰기 공유 금지 핸들을 사용합니다. 부분 해시는 앞/뒤 최대 64KiB이며 전체 SHA-256은 64KiB 버퍼를 사용합니다. 파일 핸들의 크기/수정일/속성과 FILE_ID_INFO 128비트 ID를 확인하며 하드링크는 같은 물리 데이터로 계산합니다. 파일 변경 감시가 없는 현재 결과는 검증 시점 스냅샷입니다. 볼륨이나 파일 ID를 확인하지 못하면 추측하여 확정하지 않습니다.
+
+표시하는 공간 값은 별개의 파일 데이터 개수를 기준으로 한 논리적 추정치입니다. 실제 할당 공간과 회수 가능한 공간은 현재 확정하지 않습니다. 작업의 리소스 상한/자동 백그라운드 감시는 [제품 방향](PRODUCT_DIRECTION.md)의 후속 요구사항입니다.

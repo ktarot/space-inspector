@@ -1,5 +1,7 @@
 # SPACE INSPECTOR — 통합 개발 명세서
 
+> 추가 합의: 독립적인 전문 파일 검색·관리/공간 확보 도구로 발전시키며, 외장 볼륨 식별 기반을 Phase 4 전에 선행 보완한다. 초기 집중 분석 이후 사용자의 일반 업무와 공존하는 백그라운드 탐색·리소스 제어를 후속 구현한다. 검색 사용 흐름 개편은 기능 구현 후 적용한다. 상세 요구는 [PRODUCT_DIRECTION.md](PRODUCT_DIRECTION.md)에 기록한다. 원본 안전성과 사용자 선택 원칙은 유지한다.
+
 **문서 버전:** 1.0  
 **프로젝트명:** Space Inspector  
 **GitHub:** https://github.com/ktarot/space-inspector  

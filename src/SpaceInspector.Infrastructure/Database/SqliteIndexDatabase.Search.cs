@@ -61,7 +61,7 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
             FileSort.Modified => "julianday(ModifiedTimeUtc)", FileSort.Created => "julianday(CreationTimeUtc)",
             FileSort.Path => "FullPath COLLATE NOCASE", _ => "FileId"
         };
-        command.CommandText = "SELECT FileId,FileName,FullPath,FileSize,ModifiedTimeUtc,ScanStatus,IsCloudPlaceholder FROM Files" + where
+        command.CommandText = "SELECT FileId,FileName,FullPath,FileSize,ModifiedTimeUtc,ScanStatus,IsCloudPlaceholder,VolumeIdentifier FROM Files" + where
             + " ORDER BY " + sort + (search.Descending ? " DESC" : " ASC") + ",FileId ASC LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$limit", pageSize);
         command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
@@ -71,7 +71,7 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
         {
             cancellationToken.ThrowIfCancellationRequested();
             files.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetInt64(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6)));
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6), reader.IsDBNull(7) ? null : reader.GetString(7)));
         }
         return new IndexPage(files, count, pageNumber, pageSize);
     }, cancellationToken); }

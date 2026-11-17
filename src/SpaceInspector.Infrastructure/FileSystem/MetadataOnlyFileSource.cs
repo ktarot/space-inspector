@@ -4,7 +4,7 @@ using SpaceInspector.Core.Models;
 
 namespace SpaceInspector.Infrastructure.FileSystem;
 
-public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null) : IFileMetadataSource
+public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null, IVolumeIdentityService? volumes = null) : IFileMetadataSource
 {
     private readonly string[] _excluded = (excludedDirectories ?? []).Select(ScanScope.Normalize).ToArray();
     // Offline, RecallOnOpen, RecallOnDataAccess. Content is never opened, regardless of these flags.
@@ -14,6 +14,7 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
     {
         foreach (var root in roots)
         {
+            var volume = volumes?.GetIdentity(root);
             var pending = new Stack<string>();
             pending.Push(root);
             while (pending.TryPop(out var directory))
@@ -23,6 +24,8 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
                 IEnumerator<FileSystemInfo>? entries = null;
                 try
                 {
+                    if (volume is not null && volumes?.GetIdentity(root) != volume)
+                        throw new IOException("검사 중 장치가 변경되거나 연결이 끊겼습니다.");
                     issue = CheckDirectory(directory);
                     if (issue is null)
                         entries = new DirectoryInfo(directory).EnumerateFileSystemInfos("*", new EnumerationOptions
@@ -60,7 +63,8 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
                                 // Enumeration metadata only: no stream, hash, owner query or shell media handler.
                                 metadata = new(file.FullName, file.Name, file.Extension.ToLowerInvariant(),
                                     file.DirectoryName!, Path.GetPathRoot(file.FullName)!, file.Length,
-                                    file.CreationTimeUtc, file.LastWriteTimeUtc, (int)attributes, IsCloudOnly(attributes) ? true : null);
+                                    file.CreationTimeUtc, file.LastWriteTimeUtc, (int)attributes, IsCloudOnly(attributes) ? true : null,
+                                    volume, volume is null ? null : Path.GetRelativePath(Path.GetPathRoot(file.FullName)!, file.FullName));
                             }
                         }
                         catch (Exception ex) when (IsExpected(ex)) { issue = ToIssue(entry.FullName, ex); }
