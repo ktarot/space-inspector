@@ -14,6 +14,11 @@ public sealed class MainViewModel : ObservableObject
     private readonly IFileIndexingService? _indexing;
     private CancellationTokenSource? _cancellation;
     private Task<ScanResult>? _scanTask;
+    private CancellationTokenSource? _queryCancellation;
+    private Task<IndexPage>? _queryTask;
+    private bool _searching;
+    public bool IsSearching { get => _searching; private set { _searching = value; Changed(); Changed(nameof(IsWorking)); CancelCommand.Refresh(); } }
+    public bool IsWorking => IsScanning || IsSearching;
     private string _status = "초기화 준비 중", _indexStatus = "인덱스 확인 중", _progressText = "검사 대기 중", _pageText = "";
     private bool _busy, _scanning, _ready;
     private int _page;
@@ -64,7 +69,7 @@ public sealed class MainViewModel : ObservableObject
     public string ProgressText { get => _progressText; private set { _progressText = value; Changed(); } }
     public string PageText { get => _pageText; private set { _pageText = value; Changed(); } }
     public bool IsBusy { get => _busy; private set { _busy = value; Changed(); Changed(nameof(CanEditScope)); RefreshCommands(); } }
-    public bool IsScanning { get => _scanning; private set { _scanning = value; Changed(); CancelCommand.Refresh(); } }
+    public bool IsScanning { get => _scanning; private set { _scanning = value; Changed(); Changed(nameof(IsWorking)); CancelCommand.Refresh(); } }
     public bool CanEditScope => !IsBusy;
     public string? SelectedFolder { get => _selectedFolder; set { _selectedFolder = value; Changed(); RemoveFolderCommand.Refresh(); } }
 
@@ -108,7 +113,8 @@ public sealed class MainViewModel : ObservableObject
         ScanCommand = new(RunScanAsync, Error, () => !IsBusy && _ready && _indexing is not null && (Drives.Any(d => d.IsSelected) || Folders.Count > 0));
         PreviousPageCommand = new(() => ChangePageAsync(-1), Error, () => !IsBusy && _page > 0);
         NextPageCommand = new(() => ChangePageAsync(1), Error, () => !IsBusy && ((long)_page + 1) * PageSize < _total);
-        CancelCommand = new(CancelScan, () => IsScanning && _cancellation?.IsCancellationRequested == false);
+        CancelCommand = new(CancelScan, () => (IsScanning && _cancellation?.IsCancellationRequested == false)
+            || (IsSearching && _queryCancellation?.IsCancellationRequested == false));
         AddFolderCommand = new(() =>
         {
             try
@@ -153,6 +159,10 @@ public sealed class MainViewModel : ObservableObject
             _ready = true;
             Status = "준비 완료 · 검사 범위를 선택하거나 저장된 인덱스를 조회하세요.";
         }
+        catch (OperationCanceledException)
+        {
+            Status = "저장 인덱스 조회를 취소했습니다. 새로고침으로 다시 조회할 수 있습니다.";
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             IndexStatus = "정보 확인 실패";
@@ -190,14 +200,14 @@ public sealed class MainViewModel : ObservableObject
                 "CompletedWithIssues" => "검사 완료 · 오류/건너뜀 경로를 확인하세요. 해당 영역의 기존 인덱스는 보존합니다.",
                 _ => "검사 실패 · 저장된 결과는 보존했습니다. 오류 기록을 확인하세요."
             };
-            _page = 0;
-            await LoadPageAsync();
+            await LoadPageAsync(pageNumber: 0);
             await LoadHistoryAsync();
         }
         catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
         {
             Status = "검사를 취소했습니다. 기존 인덱스는 유지됩니다.";
         }
+        catch (OperationCanceledException) { Status = "검사 후 결과 조회를 취소했습니다. 검사 기록과 인덱스는 저장되어 있습니다."; }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "검사 오류: " + ex.Message; }
         finally
         {
@@ -211,32 +221,58 @@ public sealed class MainViewModel : ObservableObject
 
     public void CancelScan()
     {
-        _cancellation?.Cancel();
+        if (IsScanning) _cancellation?.Cancel();
+        _queryCancellation?.Cancel();
         CancelCommand.Refresh();
-        Status = "취소 요청 · 현재 메타데이터 작업과 저장을 마치는 중입니다.";
+        Status = IsSearching ? "검색 취소 요청 · 조회를 중단하는 중입니다." : "취소 요청 · 현재 메타데이터 작업과 저장을 마치는 중입니다.";
     }
 
     public async Task CancelAndWaitAsync()
     {
         CancelScan();
         if (_scanTask is not null) { try { await _scanTask; } catch (Exception) { /* RunScanAsync displays the failure. */ } }
+        if (_queryTask is not null) { try { await _queryTask; } catch (Exception) { /* Query owner displays the failure. */ } }
     }
 
     private async Task ChangePageAsync(int direction)
     {
         if (IsBusy) return;
         IsBusy = true;
-        try { _page = Math.Max(0, _page + direction); await LoadPageAsync(); }
+        try { await LoadPageAsync(pageNumber: Math.Max(0, _page + direction)); }
+        catch (OperationCanceledException) { Status = "페이지 조회를 취소했습니다. 이전 결과를 유지합니다."; }
         finally { IsBusy = false; }
     }
 
-    private async Task LoadPageAsync()
+    private async Task LoadPageAsync(FileSearch? requestedSearch = null, int? pageNumber = null)
     {
         var summary = await _database.GetSummaryAsync();
         IndexStatus = summary.FileCount == 0 ? "저장된 인덱스 없음 · 파일 0개" : $"인덱스 파일 {summary.FileCount:N0}개 (없음·접근 제한 상태 포함)";
         if (_repository is null) return;
-        var page = _searchRepository is null ? await _repository.GetPageAsync(_page, PageSize)
-            : await _searchRepository.SearchAsync(_search, _page, PageSize);
+        var query = requestedSearch ?? _search;
+        var requestedPage = pageNumber ?? _page;
+        _queryCancellation = new();
+        var token = _queryCancellation.Token;
+        IsSearching = true;
+        var previousStatus = Status;
+        Status = "저장 인덱스 검색 중 · 오래 걸리면 취소를 누르세요.";
+        IndexPage page;
+        try
+        {
+            _queryTask = _searchRepository is null ? _repository.GetPageAsync(requestedPage, PageSize, token)
+                : _searchRepository.SearchAsync(query, requestedPage, PageSize, token);
+            page = await _queryTask;
+            token.ThrowIfCancellationRequested();
+            Status = previousStatus;
+        }
+        finally
+        {
+            IsSearching = false;
+            _queryTask = null;
+            _queryCancellation.Dispose();
+            _queryCancellation = null;
+        }
+        _search = query;
+        _page = requestedPage;
         _total = page.TotalCount;
         Files.Clear();
         foreach (var file in page.Files) Files.Add(file);
@@ -267,7 +303,8 @@ public sealed class MainViewModel : ObservableObject
         };
         search.Validate();
         IsBusy = true;
-        try { _search = search; _page = 0; await LoadPageAsync(); SelectedTab = 1; Status = "저장 인덱스 검색 완료 · 모든 입력 조건을 함께 적용했습니다."; }
+        try { await LoadPageAsync(search, 0); SelectedTab = 1; Status = "저장 인덱스 검색 완료 · 모든 입력 조건을 함께 적용했습니다."; }
+        catch (OperationCanceledException) { Status = "검색을 취소했습니다. 이전 결과와 저장된 인덱스를 유지합니다."; }
         finally { IsBusy = false; }
     }
 

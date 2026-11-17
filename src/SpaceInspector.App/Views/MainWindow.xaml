@@ -53,7 +53,7 @@
       </Grid>
       <Border Grid.Row="2" Background="#E8EFF7" CornerRadius="8" Padding="16" Margin="0,16,0,16">
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-          <StackPanel><TextBlock Text="{Binding ProgressText}" TextTrimming="CharacterEllipsis" MaxHeight="42" /><ProgressBar IsIndeterminate="{Binding IsScanning}" Height="4" Margin="0,10,16,0" Foreground="#3679CF" BorderThickness="0" /></StackPanel>
+          <StackPanel><TextBlock Text="{Binding ProgressText}" TextTrimming="CharacterEllipsis" MaxHeight="42" /><ProgressBar IsIndeterminate="{Binding IsWorking}" Height="4" Margin="0,10,16,0" Foreground="#3679CF" BorderThickness="0" /></StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="검사 시작 / 재검사" Command="{Binding ScanCommand}" /><Button Content="취소" Command="{Binding CancelCommand}" /></StackPanel>
         </Grid>
       </Border>

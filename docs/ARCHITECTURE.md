@@ -25,3 +25,5 @@ App → Infrastructure → Core 의존성으로 구성합니다. Core는 UI 및 
 COUNT와 페이지 조회는 같은 읽기 트랜잭션을 사용합니다. 모든 정렬은 FileId를 추가해 같은 값의 페이지 순서를 안정화합니다. 입력한 필터와 적용된 검색 모델을 분리해 페이지를 넘길 때 미적용 입력이 섞이지 않도록 합니다. 재실행 시 마지막 ScanRuns 행과 해당 ScanIssues를 복원합니다.
 
 클립보드, 파일 선택, Explorer 호출은 앱 구성에서 주입하며 테스트에서 OS 동작을 대체합니다. 기준 파일 선택은 이름·확장자만 가져오며 파일 콘텐츠를 읽지 않습니다. 파일 상세 권한, 분류/시스템 포함 필터, 미디어 길이는 이후 Phase의 분석 결과와 연결합니다.
+
+조회 취소는 검사 취소와 별도 토큰을 사용합니다. Microsoft.Data.Sqlite의 Command.Cancel은 실행을 중단하지 않으므로 `SqliteQueryCancellation`에서 [SQLite progress handler](https://www.sqlite.org/c3ref/progress_handler.html)를 등록해 1000 VM 명령마다 취소를 확인합니다. SQLITE_INTERRUPT는 토큰이 취소된 경우 OperationCanceledException으로 바꿉니다. 읽기 트랜잭션을 해제하기 전에 핸들러를 제거합니다. UI는 성공한 조회만 결과와 적용 조건/페이지에 반영합니다.

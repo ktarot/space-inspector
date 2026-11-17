@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 using SpaceInspector.Core.Indexing;
 using SpaceInspector.Core.Interfaces;
 using SpaceInspector.Core.Models;
@@ -7,7 +8,9 @@ namespace SpaceInspector.Infrastructure.Database;
 
 public sealed partial class SqliteIndexDatabase : IFileSearchRepository
 {
-    public Task<IndexPage> SearchAsync(FileSearch search, int pageNumber, int pageSize, CancellationToken cancellationToken = default) => Task.Run(() =>
+    public async Task<IndexPage> SearchAsync(FileSearch search, int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    {
+        try { return await Task.Run(() =>
     {
         search.Validate();
         ArgumentOutOfRangeException.ThrowIfNegative(pageNumber);
@@ -18,6 +21,7 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        using var cancellation = new SqliteQueryCancellation(connection, cancellationToken);
         var conditions = new List<string>();
         string Parameter(object value)
         {
@@ -70,7 +74,12 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
                 reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6)));
         }
         return new IndexPage(files, count, pageNumber, pageSize);
-    }, cancellationToken);
+    }, cancellationToken); }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 9 && cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException("검색이 취소되었습니다.", ex, cancellationToken);
+        }
+    }
 
     public Task<ScanHistory?> GetLatestScanAsync(CancellationToken cancellationToken = default) => Task.Run(() =>
     {

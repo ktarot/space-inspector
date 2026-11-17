@@ -13,7 +13,7 @@ public partial class MainWindow : Window
         Loaded += (_, _) => viewModel.RefreshCommand.Execute(null);
         Closing += async (_, e) =>
         {
-            if (!viewModel.IsScanning) return;
+            if (!viewModel.IsWorking) return;
             e.Cancel = true;
             if (_closingAfterScan) return;
             _closingAfterScan = true;
