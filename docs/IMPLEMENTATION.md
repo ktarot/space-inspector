@@ -36,7 +36,11 @@
 - [x] 로컬 Release 빌드 및 x64 자체 포함형 publish
 - [x] 로컬 테스트 29개 통과, Junction 1개는 샌드박스 제한으로 CI에서 검증
 - [x] WPF 검사 버튼 → 결과 목록 렌더링 확인 (합성 데이터)
-- [ ] GitHub Actions 전체 테스트 및 아티팩트 확인
+- [x] GitHub Actions 테스트 30개 통과 (건너뜀 0), x64 아티팩트 생성·다운로드 확인
+
+검증된 구현 커밋: `732abdc565664032cdd0bacb0df73b5435481b5c`.
+[Windows CI 결과](https://github.com/ktarot/space-inspector/actions/runs/44059580174)에서 빌드, 단위/UI 8개, 통합 22개, 자체 포함형 배포와 업로드가 모두 성공했습니다.
+[Phase 2 실행 파일 다운로드](https://github.com/ktarot/space-inspector/actions/runs/44059580174/artifacts/14317223143) (GitHub 로그인 필요, 보관 기간 14일).
 
 주요 파일: `Core/Indexing/FileIndexingService.cs`, `Core/Indexing/ScanScope.cs`, `Infrastructure/FileSystem/MetadataOnlyFileSource.cs`, `Infrastructure/Database/SqliteIndexDatabase.Indexing.cs`, `App/ViewModels/MainViewModel.cs`, `App/Views/MainWindow.xaml`.
 

@@ -38,8 +38,10 @@
 - [x] 회수/오프라인 비트 판별 (실제 OneDrive 테스트와 별개)
 - [x] ViewModel 검사 중 새로고침/범위 변경 차단, 취소 명령
 - [x] WPF 초기화 → 폴더 선택 → 검사 명령 → 3개 결과 표시/렌더링
-- [ ] CI: 실제 Junction 및 Junction 하위 폴더를 직접 선택해도 미탐색
+- [x] CI: 실제 Junction 및 Junction 하위 폴더를 직접 선택해도 미탐색
 - [ ] 실제 ACL, 물리 장치 분리, OneDrive 온라인 전용 무다운로드
 - [ ] 수백만 파일 성능, 장시간 취소 응답, 고배율/OS별 수동 검증
 
 로컬 결과: 29개 통과, Junction 1개 건너뜀. Windows CI는 Junction 테스트를 환경 변수로 활성화합니다. 검사 시작 직후 취소 예외도 일반 취소로 표시하는지 확인합니다.
+
+최종 [Windows CI](https://github.com/ktarot/space-inspector/actions/runs/44059580174): 테스트 30개 통과, 실패 0, 건너뜀 0. x64 실행 파일 아티팩트 다운로드까지 확인했습니다.
