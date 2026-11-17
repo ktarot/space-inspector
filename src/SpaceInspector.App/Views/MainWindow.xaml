@@ -12,10 +12,10 @@
         <TextBlock Text="내 파일을 이해하는 공간" Foreground="#BDCEE1" Margin="0,12,0,32" FontSize="12" />
         <Border Background="#2D4867" CornerRadius="6" Padding="12"><TextBlock Text="파일 인덱스" Foreground="White" FontWeight="Bold" /></Border>
         <TextBlock Text="조건 검색 · 아래 검색 탭" Foreground="#BDCEE1" Margin="12,24,0,0" />
-        <TextBlock Text="중복 검색 · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
+        <TextBlock Text="중복 분석 · 아래 분석 탭" Foreground="#BDCEE1" Margin="12,24,0,0" />
         <TextBlock Text="OneDrive · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
         <TextBlock Text="설정 · 준비 중" Foreground="#BDCEE1" Margin="12,24,0,0" />
-        <TextBlock Text="개발 미리보기 · Phase 3" Foreground="#BDCEE1" Margin="0,64,0,0" FontSize="11" />
+        <TextBlock Text="개발 미리보기 · Phase 4" Foreground="#BDCEE1" Margin="0,64,0,0" FontSize="11" />
         <TextBlock Text="원본 파일을 변경하지&#x0a;않습니다." Foreground="#BDCEE1" Margin="0,14,0,0" FontSize="12" />
       </StackPanel>
     </Border>
@@ -91,6 +91,7 @@
               <DataGridTextColumn Header="수정 시각 (UTC)" Binding="{Binding ModifiedTimeUtc}" Width="160" />
               <DataGridTextColumn Header="상태" Binding="{Binding StatusText}" Width="125" />
               <DataGridTextColumn Header="클라우드 속성" Binding="{Binding CloudText}" Width="145" />
+              <DataGridTextColumn Header="볼륨 식별" Binding="{Binding DeviceText}" Width="280" />
             </DataGrid.Columns>
           </DataGrid>
           <DockPanel Grid.Row="2" Margin="0,12,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="이전" Command="{Binding PreviousPageCommand}" /><Button Content="다음" Command="{Binding NextPageCommand}" /></StackPanel><TextBlock Text="{Binding PageText}" VerticalAlignment="Center" Foreground="#596B80" /></DockPanel>
@@ -99,6 +100,28 @@
           <TextBlock DockPanel.Dock="Top" Text="최대 100개 표시 · 전체 기록은 로컬 DB에 저장됩니다. 링크·클라우드 폴더·앱 폴더는 건너뜁니다." TextWrapping="Wrap" Margin="0,0,0,12" Foreground="#596B80" />
           <DataGrid ItemsSource="{Binding Issues}"><DataGrid.Columns><DataGridTextColumn Header="경로" Binding="{Binding Path}" Width="2*" /><DataGridTextColumn Header="상태" Binding="{Binding Status}" Width="130" /><DataGridTextColumn Header="내용" Binding="{Binding Message}" Width="2*" /></DataGrid.Columns></DataGrid>
         </DockPanel></TabItem>
+        <TabItem Header="중복 분석"><Grid Margin="12">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <WrapPanel IsEnabled="{Binding CanEditScope}" Margin="0,0,0,8">
+            <ComboBox Width="175" ItemsSource="{Binding DuplicateLevels}" SelectedIndex="{Binding DuplicateLevelIndex}" Margin="0,0,10,4" />
+            <CheckBox Content="시스템·프로그램 범위 포함" IsChecked="{Binding IncludeProtectedDuplicates}" VerticalAlignment="Center" Margin="0,0,12,4" />
+            <Button Content="중복 분석 시작" Command="{Binding AnalyzeDuplicatesCommand}" Padding="10,5" />
+          </WrapPanel>
+          <TextBlock Grid.Row="1" Text="저장 인덱스 전체 대상 · 장치 확인을 위해 기존 인덱스는 먼저 재검사하세요. 링크·클라우드 콘텐츠는 제외합니다. 논리적 중복량은 실제 확보 가능한 공간과 다르며, 원본은 변경하지 않습니다." TextWrapping="Wrap" Foreground="#596B80" Margin="0,0,0,8" />
+          <DataGrid Grid.Row="2" ItemsSource="{Binding DuplicateGroups}" SelectedItem="{Binding SelectedDuplicateGroup}"><DataGrid.Columns>
+            <DataGridTextColumn Header="판정" Binding="{Binding StatusText}" Width="160" />
+            <DataGridTextColumn Header="경로 수" Binding="{Binding FileCount}" Width="80" />
+            <DataGridTextColumn Header="실제 데이터 수" Binding="{Binding DataCountText}" Width="110" />
+            <DataGridTextColumn Header="중복량" Binding="{Binding SpaceText}" Width="*" />
+          </DataGrid.Columns></DataGrid>
+          <WrapPanel Grid.Row="3" Margin="0,8,0,8"><Button Content="이전 그룹" Command="{Binding PreviousGroupsCommand}" Padding="8,4" /><Button Content="다음 그룹" Command="{Binding NextGroupsCommand}" Padding="8,4" /><Button Content="선택 그룹 파일 보기" Command="{Binding LoadDuplicateMembersCommand}" Padding="8,4" /><Button Content="경로 복사" Command="{Binding CopyPathCommand}" Padding="8,4" /><Button Content="탐색기 위치" Command="{Binding RevealFileCommand}" Padding="8,4" /></WrapPanel>
+          <DataGrid Grid.Row="4" ItemsSource="{Binding DuplicateMembers}" SelectedItem="{Binding SelectedDuplicateMember}"><DataGrid.Columns>
+            <DataGridTextColumn Header="실제 경로" Binding="{Binding FullPath}" Width="2*" />
+            <DataGridTextColumn Header="크기 (바이트)" Binding="{Binding FileSize, StringFormat=N0}" Width="110" />
+            <DataGridTextColumn Header="미검증 사유" Binding="{Binding Error}" Width="*" />
+          </DataGrid.Columns></DataGrid>
+          <DockPanel Grid.Row="5" Margin="0,8,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="이전 파일" Command="{Binding PreviousMembersCommand}" Padding="8,4" /><Button Content="다음 파일" Command="{Binding NextMembersCommand}" Padding="8,4" /></StackPanel><TextBlock Text="{Binding DuplicatePageText}" VerticalAlignment="Center" /></DockPanel>
+        </Grid></TabItem>
       </TabControl>
       <TextBlock Grid.Row="4" Text="{Binding Status}" Margin="0,14,0,0" Foreground="#596B80" TextWrapping="Wrap" />
     </Grid>

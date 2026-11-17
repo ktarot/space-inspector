@@ -8,11 +8,13 @@ public sealed partial class SqliteIndexDatabase : IIndexDatabase, IScanRepositor
 {
     private readonly string _path;
     private readonly string _connectionString;
+    private readonly IVolumeIdentityService? _volumes;
 
-    public SqliteIndexDatabase(string path)
+    public SqliteIndexDatabase(string path, IVolumeIdentityService? volumes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = Path.GetFullPath(path);
+        _volumes = volumes;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = _path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
@@ -27,7 +29,13 @@ public sealed partial class SqliteIndexDatabase : IIndexDatabase, IScanRepositor
         using var versionCommand = connection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt32(versionCommand.ExecuteScalar());
-        if (version > 2) throw new InvalidOperationException("더 최신 버전에서 생성한 인덱스입니다. 앱을 업데이트하세요.");
+        if (version > 3) throw new InvalidOperationException("더 최신 버전에서 생성한 인덱스입니다. 앱을 업데이트하세요.");
+        if (version is > 0 and < 3)
+        {
+            var backupPath = _path + $".schema{version}-backup-{Guid.NewGuid():N}.db";
+            using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath, Pooling = false }.ToString());
+            backup.Open(); connection.BackupDatabase(backup);
+        }
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -86,9 +94,43 @@ public sealed partial class SqliteIndexDatabase : IIndexDatabase, IScanRepositor
                 Path TEXT NOT NULL, PathPrefix TEXT NOT NULL, Status TEXT NOT NULL, Message TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS IX_ScanIssues_ScanId ON ScanIssues(ScanId);
             CREATE INDEX IF NOT EXISTS IX_Files_LastSeen ON Files(LastSeenScanId);
-            PRAGMA user_version = 2;
+            PRAGMA user_version = 3;
             UPDATE ScanRuns SET Status = 'Interrupted' WHERE Status = 'Running';
             """;
+        command.ExecuteNonQuery();
+        if (version < 3)
+        {
+            command.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='Files';";
+            var schema = (string)command.ExecuteScalar()!;
+            command.CommandText = ("CREATE TABLE Files_v3 " + schema[schema.IndexOf('(')..])
+                .Replace("COLLATE NOCASE UNIQUE", "COLLATE NOCASE", StringComparison.OrdinalIgnoreCase);
+            command.ExecuteNonQuery();
+            command.CommandText = """
+                INSERT INTO Files_v3 SELECT * FROM Files;
+                DROP TABLE Files;
+                ALTER TABLE Files_v3 RENAME TO Files;
+                ALTER TABLE Files ADD COLUMN IndexKey TEXT COLLATE NOCASE;
+                ALTER TABLE Files ADD COLUMN VolumeRelativePath TEXT;
+                ALTER TABLE Files ADD COLUMN DuplicateRunId INTEGER;
+                ALTER TABLE Files ADD COLUMN DuplicateError TEXT;
+                UPDATE Files SET IndexKey='path|' || FullPath,PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified';
+                CREATE UNIQUE INDEX IX_Files_IndexKey ON Files(IndexKey);
+                CREATE INDEX IX_Files_Path ON Files(FullPath);
+                CREATE INDEX IX_Files_Size ON Files(FileSize);
+                CREATE INDEX IX_Files_Extension ON Files(Extension);
+                CREATE INDEX IX_Files_LastSeen ON Files(LastSeenScanId);
+                ALTER TABLE ScanScopes ADD COLUMN VolumeIdentifier TEXT;
+                CREATE TABLE Volumes(VolumeIdentifier TEXT PRIMARY KEY, RootPath TEXT NOT NULL, LastSeenUtc TEXT NOT NULL);
+                CREATE TABLE DuplicateRuns(RunId INTEGER PRIMARY KEY,StartedUtc TEXT NOT NULL,FinishedUtc TEXT,Status TEXT NOT NULL,Processed INTEGER NOT NULL DEFAULT 0,Unverified INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE DuplicateWork(RunId INTEGER NOT NULL,FileId INTEGER NOT NULL,PRIMARY KEY(RunId,FileId));
+                CREATE INDEX IX_Files_PartialHash ON Files(FileSize,PartialHash);
+                CREATE INDEX IX_Files_StatusSize ON Files(ScanStatus,FileSize);
+                CREATE INDEX IX_Files_DuplicateGroup ON Files(DuplicateGroupId);
+                PRAGMA user_version = 3;
+                """;
+            command.ExecuteNonQuery();
+        }
+        command.CommandText = "UPDATE DuplicateRuns SET Status='Interrupted' WHERE Status='Running';";
         command.ExecuteNonQuery();
         cancellationToken.ThrowIfCancellationRequested();
         transaction.Commit();
