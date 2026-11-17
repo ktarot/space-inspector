@@ -136,6 +136,10 @@ public sealed class MainViewModel : ObservableObject
             if (_repository is not null)
                 foreach (var issue in await _repository.GetIssuesAsync(result.ScanId)) Issues.Add(issue);
         }
+        catch (OperationCanceledException) when (scanCancellation.IsCancellationRequested)
+        {
+            Status = "검사를 취소했습니다. 기존 인덱스는 유지됩니다.";
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Status = "검사 오류: " + ex.Message; }
         finally
         {

@@ -7,10 +7,12 @@ namespace SpaceInspector.UnitTests;
 
 public class ScanViewModelTests
 {
-    [Fact]
-    public async Task ActiveScanDisablesRefreshAndAcceptsCancellation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActiveScanDisablesRefreshAndAcceptsCancellation(bool throwsOnCancellation)
     {
-        var scanner = new BlockingScanner();
+        var scanner = new BlockingScanner(throwsOnCancellation);
         var model = new MainViewModel(new EmptyDrives(), new EmptyDatabase(), scanner);
         await model.InitializeAsync();
         Assert.False(model.ScanCommand.CanExecute(null));
@@ -30,14 +32,14 @@ public class ScanViewModelTests
         Assert.Equal(@"C:\fixture", Assert.Single(scanner.Roots));
     }
 
-    private sealed class BlockingScanner : IFileIndexingService
+    private sealed class BlockingScanner(bool throwsOnCancellation) : IFileIndexingService
     {
         public string[] Roots { get; private set; } = [];
         public async Task<ScanResult> ScanAsync(IEnumerable<string> roots, IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
         {
             Roots = roots.ToArray();
             try { await Task.Delay(Timeout.Infinite, cancellationToken); }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) when (!throwsOnCancellation) { }
             return new(1, "Cancelled", 0, 0, 0);
         }
     }
