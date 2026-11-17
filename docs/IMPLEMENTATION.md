@@ -58,7 +58,10 @@
 - [x] Release 빌드 경고/오류 0, 로컬 테스트 37개 통과/Junction 1개 건너뜀
 - [x] WPF 검색 적용·기준 파일·결과 선택·경로 명령·검사 요약 복원 검증 및 렌더링
 - [x] Windows x64 자체 포함형 publish
-- [ ] GitHub CI 및 아티팩트 확인
+- [x] GitHub CI: 테스트 38개 통과/실패 0/건너뜀 0, x64 아티팩트 업로드 확인
+
+구현 커밋 `e2dd1f2f64d04c1e65585808122e453d070db87b`의 [Windows CI](https://github.com/ktarot/space-inspector/actions/runs/44095411285)가 성공했습니다.
+[Phase 3 실행 파일 아티팩트](https://github.com/ktarot/space-inspector/actions/runs/44095411285/artifacts/14334116012) (GitHub 로그인 필요, 14일 보관).
 
 주요 파일: `Core/Models/FileSearch.cs`, `Core/Interfaces/IFileSearchRepository.cs`, `Infrastructure/Database/SqliteIndexDatabase.Search.cs`, `App/ViewModels/MainViewModel.cs`, `App/Views/MainWindow.xaml`, `App/App.xaml.cs`, 검색 통합 및 WPF 테스트.
 

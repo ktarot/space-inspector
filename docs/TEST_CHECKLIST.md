@@ -58,5 +58,5 @@
 - [x] 파일 선택 후 복사/위치 열기 인자 전달, 새로고침 후 검사 요약·오류 복원
 - [x] 검색 조건 및 결과 화면 렌더링
 - [x] 로컬 전체 37개 통과, Junction 1개 건너뜀, x64 publish
-- [ ] CI 전체 테스트 및 아티팩트
+- [x] CI 전체 테스트 38개 통과(건너뜀 0) 및 아티팩트: [실행 결과](https://github.com/ktarot/space-inspector/actions/runs/44095411285)
 - [ ] 실제 대규모 사용자 DB 검색 성능 및 실제 Explorer/클립보드 수동 확인
