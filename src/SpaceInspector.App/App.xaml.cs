@@ -12,9 +12,16 @@ namespace SpaceInspector.App;
 public partial class App : Application
 {
     private System.IO.FileStream? _instanceLock;
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Length == 3 && e.Args[0] == "--permission-worker" && int.TryParse(e.Args[2], out var parent))
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            try { await PermissionWorker.RunAsync(e.Args[1], parent); }
+            catch (Exception) { /* Parent detects helper termination and retains its pending item. */ }
+            Shutdown(); return;
+        }
         var databasePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SpaceInspector", "index.db");
         try
@@ -29,26 +36,7 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        var volumes = new WindowsVolumeIdentityService();
-        var database = new SqliteIndexDatabase(databasePath, volumes);
-        var source = new MetadataOnlyFileSource([System.IO.Path.GetDirectoryName(databasePath)!, AppContext.BaseDirectory], volumes);
-        var viewModel = new MainViewModel(new LocalDriveService(), database, new FileIndexingService(source, database), database, () =>
-        {
-            var dialog = new OpenFolderDialog { Title = "검사할 폴더 선택", Multiselect = true };
-            return dialog.ShowDialog(MainWindow) == true ? dialog.FolderNames : [];
-        }, copyPath: Clipboard.SetText, revealFile: path =>
-        {
-            if (!System.IO.File.Exists(path)) throw new System.IO.FileNotFoundException("원본 파일이 없거나 접근할 수 없습니다. 드라이브 연결과 권한을 확인하세요.");
-            var start = new System.Diagnostics.ProcessStartInfo("explorer.exe") { UseShellExecute = false };
-            start.ArgumentList.Add("/select," + path);
-            System.Diagnostics.Process.Start(start);
-        }, pickReferenceFile: () =>
-        {
-            var dialog = new OpenFileDialog { Title = "기준 파일 선택 (이름·확장자 적용)", CheckFileExists = true };
-            return dialog.ShowDialog(MainWindow) == true ? dialog.FileName : null;
-        }, duplicates: new DuplicateAnalysisService(database, new WindowsFileFingerprintService(volumes)), duplicateRepository: database,
-            validateDevice: file => file.VolumeIdentifier is not null && volumes.GetIdentity(file.FullPath) == file.VolumeIdentifier);
-        var window = new MainWindow(viewModel);
+        var window = new WorkWindow(new WorkViewModel(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(databasePath)!, "jobs")));
         MainWindow = window;
         window.Show();
     }

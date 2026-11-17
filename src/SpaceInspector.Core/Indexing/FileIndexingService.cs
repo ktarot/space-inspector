@@ -4,14 +4,14 @@ using SpaceInspector.Core.Models;
 
 namespace SpaceInspector.Core.Indexing;
 
-public sealed class FileIndexingService(IFileMetadataSource source, IScanRepository repository) : IFileIndexingService
+public sealed class FileIndexingService(IFileMetadataSource source, IScanRepository repository, bool recursive = true) : IFileIndexingService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<ScanResult> ScanAsync(IEnumerable<string> roots, IProgress<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var normalized = ScanScope.NormalizeRoots(roots);
+        var normalized = recursive ? ScanScope.NormalizeRoots(roots) : roots.Select(ScanScope.Normalize).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (!await _gate.WaitAsync(0, cancellationToken)) throw new InvalidOperationException("이미 검사 중입니다.");
         try
         {

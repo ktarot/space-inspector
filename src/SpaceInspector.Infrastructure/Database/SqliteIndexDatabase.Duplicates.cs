@@ -16,7 +16,7 @@ public sealed partial class SqliteIndexDatabase : IDuplicateRepository
         command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         var id = Convert.ToInt64(command.ExecuteScalar());
         command.Parameters.Clear(); command.Parameters.AddWithValue("$run", id);
-        command.CommandText = "DELETE FROM DuplicateWork; INSERT INTO DuplicateWork SELECT $run,FileId FROM Files WHERE ScanStatus='Normal' AND FileSize IN (SELECT FileSize FROM Files WHERE ScanStatus='Normal' GROUP BY FileSize HAVING COUNT(*)>1);";
+        command.CommandText = "DELETE FROM DuplicateWork; INSERT INTO DuplicateWork SELECT $run,FileId FROM Files WHERE ScanStatus='Normal' AND FileSize IN (SELECT FileSize FROM Files WHERE ScanStatus='Normal' GROUP BY FileSize HAVING COUNT(*)>1); UPDATE Files SET DuplicateRunId=$run,DuplicateStatus='Pending' WHERE FileId IN (SELECT FileId FROM DuplicateWork WHERE RunId=$run);";
         command.ExecuteNonQuery();
         cancellationToken.ThrowIfCancellationRequested();
         transaction.Commit(); return id;
@@ -76,7 +76,7 @@ public sealed partial class SqliteIndexDatabase : IDuplicateRepository
         using var connection = Open(); using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.Parameters.AddWithValue("$run", result.RunId);
-        if (result.Status == "Completed")
+        if (result.Status is "Completed" or "Cancelled" or "Failed" or "Interrupted")
         {
             command.CommandText = """
                 UPDATE Files SET DuplicateStatus='NotDuplicate',DuplicateGroupId=NULL WHERE DuplicateRunId=$run AND PartialHash IS NOT NULL;
@@ -118,9 +118,11 @@ public sealed partial class SqliteIndexDatabase : IDuplicateRepository
         command.CommandText = """
             SELECT * FROM (
                 SELECT DuplicateGroupId,DuplicateStatus,COUNT(*),COUNT(DISTINCT FileSystemIdentifier),FileSize
-                FROM Files WHERE DuplicateGroupId IS NOT NULL GROUP BY DuplicateGroupId HAVING COUNT(*)>1
+                FROM Files WHERE DuplicateGroupId IS NOT NULL GROUP BY DuplicateGroupId HAVING COUNT(*)>1 OR DuplicateStatus='StrongCandidate'
                 UNION ALL SELECT 'unverified','Unverified',COUNT(*),0,0 FROM Files
                     WHERE DuplicateRunId IS NOT NULL AND DuplicateStatus='Unverified' HAVING COUNT(*)>0
+                UNION ALL SELECT 'pending','Pending',COUNT(*),0,0 FROM Files
+                    WHERE DuplicateRunId IS NOT NULL AND DuplicateStatus='Pending' HAVING COUNT(*)>0
             ) ORDER BY 2,5 DESC,1 LIMIT $limit OFFSET $offset
             """;
         command.Parameters.AddWithValue("$limit", Math.Clamp(pageSize, 1, 200)); command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
@@ -140,7 +142,7 @@ public sealed partial class SqliteIndexDatabase : IDuplicateRepository
         ArgumentOutOfRangeException.ThrowIfNegative(pageNumber);
         using var connection = Open(); using var command = connection.CreateCommand();
         using var cancellation = new SqliteQueryCancellation(connection, cancellationToken);
-        command.CommandText = "SELECT FileId,FullPath,FileSize,DuplicateStatus,DuplicateError,VolumeIdentifier FROM Files WHERE DuplicateGroupId=$group OR ($group='unverified' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Unverified') ORDER BY FileId LIMIT $limit OFFSET $offset";
+        command.CommandText = "SELECT FileId,FullPath,FileSize,DuplicateStatus,DuplicateError,VolumeIdentifier FROM Files WHERE DuplicateGroupId=$group OR ($group='unverified' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Unverified') OR ($group='pending' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Pending') ORDER BY FileId LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$group", groupId); command.Parameters.AddWithValue("$limit", Math.Clamp(pageSize, 1, 200));
         command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
         using var reader = command.ExecuteReader(); var files = new List<DuplicateMember>();

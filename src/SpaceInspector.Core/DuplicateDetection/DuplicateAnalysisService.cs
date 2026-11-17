@@ -41,6 +41,10 @@ public sealed class DuplicateAnalysisService(IDuplicateRepository repository, IF
                             }
                             var level = pass == 1 ? DuplicateLevel.FullHash : options.Level == DuplicateLevel.Size ? DuplicateLevel.Size : DuplicateLevel.PartialHash;
                             var fingerprint = await fingerprints.ComputeAsync(file, level, options.IncludeProtected, cancellationToken);
+                            // A cancelled run may expose only hashes whose per-file validation already completed.
+                            if (pass == 1 && fingerprint.Status != "Unverified"
+                                && !await fingerprints.IsCurrentAsync(file with { PhysicalId = fingerprint.PhysicalId }, cancellationToken))
+                                fingerprint = new("Unverified", Error: "검사 중 파일 또는 장치 변경 감지");
                             await repository.StoreFingerprintAsync(id, file, fingerprint, pass == 1, cancellationToken);
                             processed++;
                             if (fingerprint.Status == "Unverified") unverified++;

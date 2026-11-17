@@ -128,11 +128,13 @@ public sealed partial class SqliteIndexDatabase
         // substr + NOCASE avoids LIKE wildcard surprises in folder names such as "100%_done".
         if (result.Status is "Completed" or "CompletedWithIssues")
         {
+            command.Parameters.AddWithValue("$recursive", _reconcileRecursively ? 1 : 0);
             command.CommandText = """
                 UPDATE Files SET ScanStatus='Missing', PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified'
                 WHERE (LastSeenScanId IS NULL OR LastSeenScanId <> $id)
                 AND EXISTS (SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id
                     AND (Files.VolumeIdentifier=s.VolumeIdentifier OR (Files.VolumeIdentifier IS NULL AND s.VolumeIdentifier IS NULL))
+                    AND ($recursive=1 OR Files.ParentDirectory=s.RootPath COLLATE NOCASE)
                     AND substr(Files.FullPath,1,length(s.PathPrefix))=s.PathPrefix COLLATE NOCASE)
                 AND NOT EXISTS (SELECT 1 FROM ScanIssues i WHERE i.ScanId=$id
                     AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));

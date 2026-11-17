@@ -4,7 +4,7 @@ using SpaceInspector.Core.Models;
 
 namespace SpaceInspector.Infrastructure.FileSystem;
 
-public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null, IVolumeIdentityService? volumes = null) : IFileMetadataSource
+public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null, IVolumeIdentityService? volumes = null, WorkSpecification? specification = null) : IFileMetadataSource
 {
     private readonly string[] _excluded = (excludedDirectories ?? []).Select(ScanScope.Normalize).ToArray();
     // Offline, RecallOnOpen, RecallOnDataAccess. Content is never opened, regardless of these flags.
@@ -14,6 +14,7 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
     {
         foreach (var root in roots)
         {
+            if (specification is not null && !specification.AllowsDirectory(root)) continue;
             var volume = volumes?.GetIdentity(root);
             var pending = new Stack<string>();
             pending.Push(root);
@@ -24,6 +25,8 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
                 IEnumerator<FileSystemInfo>? entries = null;
                 try
                 {
+                    if (specification is not null && specification.Volumes.TryGetValue(Path.GetPathRoot(root)!, out var expected) && expected != volume)
+                        throw new IOException("선택 당시 장치와 다릅니다. 원래 장치를 연결하세요.");
                     if (volume is not null && volumes?.GetIdentity(root) != volume)
                         throw new IOException("검사 중 장치가 변경되거나 연결이 끊겼습니다.");
                     issue = CheckDirectory(directory);
@@ -53,12 +56,14 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
                             var attributes = entry.Attributes;
                             if ((attributes & FileAttributes.Directory) != 0)
                             {
+                                if (specification?.Recursive == false) continue;
                                 if ((attributes & FileAttributes.ReparsePoint) != 0 || IsCloudOnly(attributes))
                                     issue = new(entry.FullName, "SkippedDirectory", "디렉터리 링크 또는 클라우드 전용 폴더: 자동 접근하지 않음");
                                 else pending.Push(entry.FullName);
                             }
                             else
                             {
+                                if (specification is not null && !specification.AllowsFile(entry.FullName)) continue;
                                 var file = (FileInfo)entry;
                                 // Enumeration metadata only: no stream, hash, owner query or shell media handler.
                                 metadata = new(file.FullName, file.Name, file.Extension.ToLowerInvariant(),

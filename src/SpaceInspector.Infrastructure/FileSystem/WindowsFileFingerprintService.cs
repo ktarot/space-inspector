@@ -10,7 +10,7 @@ using SpaceInspector.Core.Models;
 
 namespace SpaceInspector.Infrastructure.FileSystem;
 
-public sealed class WindowsFileFingerprintService(IVolumeIdentityService volumes) : IFileFingerprintService
+public sealed class WindowsFileFingerprintService(IVolumeIdentityService volumes, Action<int>? bytesRead = null) : IFileFingerprintService
 {
     private const uint Flags = 0x00200000 | 0x00100000 | 0x08000000; // OPEN_REPARSE_POINT, OPEN_NO_RECALL, SEQUENTIAL_SCAN
     public async Task<FileFingerprint> ComputeAsync(DuplicateCandidate file, DuplicateLevel level, bool includeProtected, CancellationToken cancellationToken)
@@ -32,6 +32,7 @@ public sealed class WindowsFileFingerprintService(IVolumeIdentityService volumes
                     cancellationToken.ThrowIfCancellationRequested();
                     var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(length, buffer.Length)), cancellationToken);
                     if (read == 0) throw new IOException("검사 중 파일 크기가 변경되었습니다.");
+                    bytesRead?.Invoke(read);
                     hash.AppendData(buffer, 0, read); length -= read;
                 }
             }

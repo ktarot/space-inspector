@@ -9,17 +9,22 @@ public sealed partial class SqliteIndexDatabase : IIndexDatabase, IScanRepositor
     private readonly string _path;
     private readonly string _connectionString;
     private readonly IVolumeIdentityService? _volumes;
+    private readonly bool _reconcileRecursively;
 
-    public SqliteIndexDatabase(string path, IVolumeIdentityService? volumes = null)
+    public SqliteIndexDatabase(string path, IVolumeIdentityService? volumes = null, bool reconcileRecursively = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = Path.GetFullPath(path);
         _volumes = volumes;
+        _reconcileRecursively = reconcileRecursively;
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = _path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
+            DataSource = DatabaseFilePath(_path), Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
         }.ToString();
     }
+
+    private static string DatabaseFilePath(string path) => OperatingSystem.IsWindows() && !path.StartsWith(@"\\?\", StringComparison.Ordinal)
+        ? @"\\?\" + Path.GetFullPath(path) : path;
 
     public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.Run(() =>
     {
@@ -33,7 +38,7 @@ public sealed partial class SqliteIndexDatabase : IIndexDatabase, IScanRepositor
         if (version is > 0 and < 3)
         {
             var backupPath = _path + $".schema{version}-backup-{Guid.NewGuid():N}.db";
-            using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath, Pooling = false }.ToString());
+            using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabaseFilePath(backupPath), Pooling = false }.ToString());
             backup.Open(); connection.BackupDatabase(backup);
         }
         using var transaction = connection.BeginTransaction();
