@@ -8,7 +8,7 @@
 - [x] SQLite: 신규 생성, 다시 열기, 재초기화 시 데이터 보존
 - [x] SQLite: 미래 스키마 거부, 취소 시 DB 미생성
 - [x] Windows x64 자체 포함형 publish
-- [ ] GitHub Actions 성공과 실행 파일 아티팩트
+- [x] GitHub Actions 성공과 실행 파일 아티팩트: [실행 결과](https://github.com/ktarot/space-inspector/actions/runs/44056423480)
 
 ## 실행 검증
 

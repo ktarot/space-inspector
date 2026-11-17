@@ -14,8 +14,12 @@
 - [x] 테스트 10개 통과: 단위/UI 6개, SQLite 통합 4개
 - [x] WPF 기본 창 생성·로딩·렌더링 검증 (합성 드라이브, 임시 DB)
 - [x] Windows x64 자체 포함형 publish 성공
-- [ ] GitHub 반영 및 Actions 성공 확인
-- [ ] 아티팩트 다운로드 가능 확인
+- [x] GitHub main 반영 및 Actions 성공 확인
+- [x] 실행 파일 아티팩트 업로드 확인 (다운로드 링크 제공)
+
+검증된 구현 커밋: `1f90cf2be9616e5b97d9af48aa8ade5a2c680e90`.
+[Windows 자동 빌드](https://github.com/ktarot/space-inspector/actions/runs/44056423480)에서 복원, 빌드, 테스트, publish 및 아티팩트 업로드가 모두 성공했습니다.
+[SpaceInspector-win-x64 다운로드](https://github.com/ktarot/space-inspector/actions/runs/44056423480/artifacts/14316037635) (GitHub 로그인 필요, 보관 기간 14일).
 
 로컬 검증일: 2026-11-17. .NET SDK 10.0.404 사용. 드라이브 사용률 ProgressBar의 기본 TwoWay 바인딩 오류를 실행 테스트에서 발견하여 OneWay로 수정했습니다. NuGet 취약점 검사에서 발견된 이전 SQLite 의존성은 Microsoft.Data.Sqlite 10.0.15로 갱신하여 복원을 통과했습니다. 테스트 도구가 VSTEST_ARTIFACTS_DIRECTORY 관련 안내 메시지를 출력하지만 테스트는 정상 완료됩니다. Windows 10/11 각각의 수동 호환성 및 고배율 검사는 아직 수행하지 않았습니다.
 
