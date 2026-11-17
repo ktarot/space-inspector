@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpaceInspector.Core/SpaceInspector.Core.csproj" />
+    <Project Path="src/SpaceInspector.Infrastructure/SpaceInspector.Infrastructure.csproj" />
+    <Project Path="src/SpaceInspector.App/SpaceInspector.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SpaceInspector.UnitTests/SpaceInspector.UnitTests.csproj" />
+    <Project Path="tests/SpaceInspector.IntegrationTests/SpaceInspector.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,42 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore SpaceInspector.slnx
+      - name: Build
+        run: dotnet build SpaceInspector.slnx --configuration Release --no-restore
+      - name: Test
+        run: dotnet test SpaceInspector.slnx --configuration Release --no-build --logger trx --results-directory TestResults
+      - name: Publish Windows x64
+        run: dotnet publish src/SpaceInspector.App/SpaceInspector.App.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=false --output artifacts/win-x64
+      - name: Upload application
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpaceInspector-win-x64
+          path: artifacts/win-x64/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: warn
