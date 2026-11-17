@@ -68,4 +68,4 @@
 - [x] 검색 중 취소 활성화, 취소 후 이전 결과 유지, 재검색 허용
 - [x] 창 종료 요청이 검색에 취소를 전달하고 기다림
 - [x] 로컬 40개 통과, Junction 1개 건너뜀
-- [ ] Windows CI 최종 결과
+- [x] Windows CI 최종 결과: [41개 통과, 실패/건너뜀 0](https://github.com/ktarot/space-inspector/actions/runs/44097732392), 실행 파일 게시/업로드 성공
