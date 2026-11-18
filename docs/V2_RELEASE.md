@@ -43,4 +43,4 @@
 
 그룹 검토/휴지통 관리 개선판 검증: [Windows CI #44238794193](https://github.com/ktarot/space-inspector/actions/runs/44238794193) — 단위/UI 11개, 통합 58개, 실패/건너뜀 0, Windows x64 publish 및 아티팩트 업로드 성공. 커밋 03dad1fb23432cfc4ea614285c0b0e2b2800e147.
 
-시스템 휴지통 제외 개선 검증은 다음 CI 실행 결과를 여기에 추가한다.
+시스템 휴지통 제외 개선 검증: [Windows CI #44290042662](https://github.com/ktarot/space-inspector/actions/runs/44290042662) — 단위/UI 11개, 통합 59개, 실패/건너뜀 0, Windows x64 publish 및 아티팩트 업로드 성공. 커밋 475d441ddd4c8da7cbbb0f0b7a94b62868b185a0. 로컬 SHA-256: 58E19C3345FF2BA3B1AB0CBCE5B30306DEE05F1260075A3CF4B6FD3843B139B3.
