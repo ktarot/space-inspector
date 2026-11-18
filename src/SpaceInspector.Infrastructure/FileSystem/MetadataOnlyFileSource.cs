@@ -4,7 +4,8 @@ using SpaceInspector.Core.Models;
 
 namespace SpaceInspector.Infrastructure.FileSystem;
 
-public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null, IVolumeIdentityService? volumes = null, WorkSpecification? specification = null) : IFileMetadataSource
+public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirectories = null, IVolumeIdentityService? volumes = null,
+    WorkSpecification? specification = null, Func<string, string?>? driveRoot = null) : IFileMetadataSource
 {
     private readonly string[] _excluded = (excludedDirectories ?? []).Select(ScanScope.Normalize).ToArray();
     // Offline, RecallOnOpen, RecallOnDataAccess. Content is never opened, regardless of these flags.
@@ -84,6 +85,8 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
     {
         if (_excluded.Any(root => ScanScope.Contains(root, path)))
             return new(path, "SkippedExcluded", "앱 데이터 또는 실행 폴더 제외");
+        if (IsProtectedSystemDirectory(path, driveRoot?.Invoke(path) ?? Path.GetPathRoot(path)!))
+            return new(path, "SkippedExcluded", "Windows 휴지통 또는 시스템 복원 폴더는 탐색 대상에서 제외");
         var drive = new DriveInfo(Path.GetPathRoot(path)!);
         if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable))
             return new(path, "Unavailable", "로컬 고정/이동식 드라이브만 검사할 수 있습니다.");
@@ -98,6 +101,23 @@ public sealed class MetadataOnlyFileSource(IEnumerable<string>? excludedDirector
             if ((attributes & FileAttributes.Directory) == 0) throw new DirectoryNotFoundException("폴더를 찾을 수 없습니다.");
         }
         return null;
+    }
+
+    public static bool IsProtectedSystemDirectory(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        return !string.IsNullOrEmpty(root) && IsProtectedSystemDirectory(path, root);
+    }
+
+    public static bool IsProtectedSystemDirectory(string path, string driveRoot)
+    {
+        if (string.IsNullOrWhiteSpace(driveRoot)) return false;
+        var root = Path.GetFullPath(driveRoot);
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+        if (relative == "." || Path.IsPathRooted(relative) || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return false;
+        var first = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return string.Equals(first, "$RECYCLE.BIN", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(first, "System Volume Information", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsExpected(Exception ex) => ex is IOException or UnauthorizedAccessException or System.Security.SecurityException;

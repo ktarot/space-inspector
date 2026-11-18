@@ -179,6 +179,22 @@ public sealed class WorkSessionTests : IDisposable
         Assert.Equal(1, (await session.Index.GetPageAsync(0, 100)).Files.Count(f => f.ScanStatus == "Normal"));
     }
 
+    [Fact]
+    public async Task RecycleBinAndSystemVolumeInformationAreSkippedWithoutPermissionWait()
+    {
+        Write("visible.jpg"); Write(Path.Combine("$RECYCLE.BIN", "S-1-5-21", "deleted.jpg"));
+        Write(Path.Combine("System Volume Information", "restore.jpg"));
+        Assert.True(MetadataOnlyFileSource.IsProtectedSystemDirectory(Path.Combine(Root, "$RECYCLE.BIN"), Root));
+        Assert.True(MetadataOnlyFileSource.IsProtectedSystemDirectory(Path.Combine(Root, "$RECYCLE.BIN", "S-1-5-21"), Root));
+        Assert.True(MetadataOnlyFileSource.IsProtectedSystemDirectory(Path.Combine(Root, "System Volume Information"), Root));
+        Assert.False(MetadataOnlyFileSource.IsProtectedSystemDirectory(Path.Combine(Root, "user", "$RECYCLE.BIN"), Root));
+        var session = Session(Spec(), s => new MetadataOnlyFileSource(volumes: _volumes, specification: s, driveRoot: _ => Root)); await session.ExecuteAsync(true, null, default);
+        var files = (await session.Index.GetPageAsync(0, 100)).Files;
+        Assert.Single(files); Assert.EndsWith("visible.jpg", files[0].FullPath, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(session.Pending, p => p.State == "응답 대기");
+        Assert.All(session.Pending, p => Assert.Equal("보호 규칙으로 제외", p.State));
+    }
+
     private sealed class SyntheticSource(IFileMetadataSource inner, Func<ScanIssue?> issue) : IFileMetadataSource
     {
         public IEnumerable<ScanObservation> Enumerate(IReadOnlyList<string> roots, CancellationToken token)
