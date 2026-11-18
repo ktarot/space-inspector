@@ -142,11 +142,11 @@ public sealed partial class SqliteIndexDatabase : IDuplicateRepository
         ArgumentOutOfRangeException.ThrowIfNegative(pageNumber);
         using var connection = Open(); using var command = connection.CreateCommand();
         using var cancellation = new SqliteQueryCancellation(connection, cancellationToken);
-        command.CommandText = "SELECT FileId,FullPath,FileSize,DuplicateStatus,DuplicateError,VolumeIdentifier FROM Files WHERE DuplicateGroupId=$group OR ($group='unverified' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Unverified') OR ($group='pending' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Pending') ORDER BY FileId LIMIT $limit OFFSET $offset";
+        command.CommandText = "SELECT FileId,FullPath,FileSize,DuplicateStatus,DuplicateError,VolumeIdentifier,FileSystemIdentifier FROM Files WHERE DuplicateGroupId=$group OR ($group='unverified' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Unverified') OR ($group='pending' AND DuplicateRunId IS NOT NULL AND DuplicateStatus='Pending') ORDER BY FileId LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$group", groupId); command.Parameters.AddWithValue("$limit", Math.Clamp(pageSize, 1, 200));
         command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
         using var reader = command.ExecuteReader(); var files = new List<DuplicateMember>();
-        while (reader.Read()) { cancellationToken.ThrowIfCancellationRequested(); files.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5))); }
+        while (reader.Read()) { cancellationToken.ThrowIfCancellationRequested(); files.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6))); }
         return files;
     }, cancellationToken);
 }

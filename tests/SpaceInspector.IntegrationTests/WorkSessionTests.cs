@@ -164,6 +164,21 @@ public sealed class WorkSessionTests : IDisposable
         Assert.Equal("ConfirmedDuplicate", Assert.Single(await db.GetDuplicateGroupsAsync(0, 100)).Status);
     }
 
+    [Fact]
+    public async Task RecycledFileIsRemovedFromCurrentDuplicateResultAndIndex()
+    {
+        var first = Write("a.jpg"); Write("b.jpg");
+        var session = Session(Spec()); await session.ExecuteAsync(true, null, default);
+        var result = session.Result!;
+        var group = Assert.Single(await result.GetDuplicateGroupsAsync(0, 100));
+        var member = (await result.GetDuplicateMembersAsync(group.GroupId, 0, 100)).Single(m => m.FullPath == first);
+        await result.MarkRecycledAsync(member.FileId, member.FullPath);
+        await session.Index.MarkRecycledAsync(member.FileId, member.FullPath);
+        Assert.Empty(await result.GetDuplicateGroupsAsync(0, 100));
+        Assert.Equal(1, (await result.GetPageAsync(0, 100)).Files.Count(f => f.ScanStatus == "Normal"));
+        Assert.Equal(1, (await session.Index.GetPageAsync(0, 100)).Files.Count(f => f.ScanStatus == "Normal"));
+    }
+
     private sealed class SyntheticSource(IFileMetadataSource inner, Func<ScanIssue?> issue) : IFileMetadataSource
     {
         public IEnumerable<ScanObservation> Enumerate(IReadOnlyList<string> roots, CancellationToken token)

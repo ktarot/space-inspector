@@ -3,6 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="Space Inspector — 선택 범위 탐색·비교" Width="1220" Height="900" MinWidth="980" MinHeight="720" Background="#F3F6FA">
  <Window.Resources>
+  <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
   <Style TargetType="Button"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="12,7"/></Style>
   <Style TargetType="CheckBox"><Setter Property="Margin" Value="8,6"/></Style>
   <Style TargetType="DataGrid"><Setter Property="IsReadOnly" Value="True"/><Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="CanUserAddRows" Value="False"/><Setter Property="SelectionMode" Value="Single"/><Setter Property="EnableRowVirtualization" Value="True"/></Style>
@@ -58,20 +59,23 @@
     <Grid Margin="8"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <DockPanel><TextBlock Text="확인은 검사 시점 기준 · 중단 결과에는 추가 중복본이 누락될 수 있습니다." VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="이전 그룹" Command="{Binding PreviousGroupsCommand}"/><Button Content="다음 그룹" Command="{Binding NextGroupsCommand}"/></StackPanel></DockPanel>
      <DataGrid Grid.Row="1" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"><DataGrid.Columns><DataGridTextColumn Header="판정" Binding="{Binding StatusText}" Width="*"/><DataGridTextColumn Header="파일 수" Binding="{Binding FileCount}" Width="90"/><DataGridTextColumn Header="실제 데이터 수" Binding="{Binding DataCountText}" Width="120"/><DataGridTextColumn Header="논리적 중복량 (실제 확보량 아님)" Binding="{Binding SpaceText}" Width="280"/></DataGrid.Columns></DataGrid>
-     <StackPanel Grid.Row="2" Orientation="Horizontal"><Button Content="선택 그룹 파일 보기" Command="{Binding LoadMembersCommand}"/><Button Content="이전 파일" Command="{Binding PreviousMembersCommand}"/><Button Content="다음 파일" Command="{Binding NextMembersCommand}"/></StackPanel>
-     <DataGrid Grid.Row="3" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}"><DataGrid.Columns><DataGridTextColumn Header="파일명" Binding="{Binding FileName}" Width="160"/><DataGridTextColumn Header="파일 경로" Binding="{Binding FullPath}" Width="*"/><DataGridTextColumn Header="바이트" Binding="{Binding FileSize}" Width="110"/><DataGridTextColumn Header="미검증 사유" Binding="{Binding Error}" Width="300"/></DataGrid.Columns></DataGrid>
+     <DockPanel Grid.Row="2" LastChildFill="False"><TextBlock Text="그룹을 선택하면 아래 파일 목록이 자동으로 바뀝니다." VerticalAlignment="Center" Margin="4"/><StackPanel Orientation="Horizontal" DockPanel.Dock="Right"><Button Content="이전 100개" Command="{Binding PreviousMembersCommand}" Visibility="{Binding CanPageMembers, Converter={StaticResource BoolToVisibility}}"/><Button Content="다음 100개" Command="{Binding NextMembersCommand}" Visibility="{Binding CanPageMembers, Converter={StaticResource BoolToVisibility}}"/></StackPanel></DockPanel>
+     <DataGrid Grid.Row="3" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"><DataGrid.Columns><DataGridTextColumn Header="파일명" Binding="{Binding FileName}" Width="180"/><DataGridTextColumn Header="파일 경로" Binding="{Binding FullPath}" Width="650"/><DataGridTextColumn Header="바이트" Binding="{Binding FileSize}" Width="130"/><DataGridTextColumn Header="검증 사유" Binding="{Binding Error}" Width="500"/></DataGrid.Columns></DataGrid>
     </Grid>
    </TabItem>
    <TabItem Header="응답 대기 · 제외">
     <DockPanel Margin="8">
-     <StackPanel DockPanel.Dock="Top"><TextBlock Text="이 항목만 보류하며 나머지 작업은 계속됩니다. 권한 요청은 Windows 승인이 필요합니다. 보호 규칙은 권한 상승으로 해제하지 않습니다." TextWrapping="Wrap" Margin="4"/><StackPanel Orientation="Horizontal"><Button Content="선택 항목 재시도" Command="{Binding RetryCommand}"/><Button Content="선택 항목 권한 요청" Command="{Binding PermissionCommand}"/><Button Content="건너뛰기" Command="{Binding SkipCommand}"/></StackPanel></StackPanel>
-     <DataGrid ItemsSource="{Binding Pending}" SelectedItem="{Binding SelectedPending}"><DataGrid.Columns><DataGridTextColumn Header="상태" Binding="{Binding State}" Width="140"/><DataGridTextColumn Header="경로" Binding="{Binding Path}" Width="*"/><DataGridTextColumn Header="이유" Binding="{Binding Reason}" Width="350"/></DataGrid.Columns></DataGrid>
+     <StackPanel DockPanel.Dock="Top"><TextBlock Text="원인과 폴더별로 묶었습니다. 묶음을 선택하면 아래에서 전체 경로와 이유를 확인할 수 있습니다." TextWrapping="Wrap" Margin="4"/><StackPanel Orientation="Horizontal"><Button Content="선택 항목 다시 확인" Command="{Binding RetryCommand}" ToolTip="같은 경로를 현재 사용자 권한으로 다시 확인합니다."/><Button Content="관리자 권한으로 다시 확인" Command="{Binding PermissionCommand}" ToolTip="Windows 승인 창을 통해 별도 관리자 작업으로 재시도합니다."/><Button Content="이번 작업에서 제외" Command="{Binding SkipCommand}" ToolTip="이번 작업에서만 건너뜁니다. 파일은 변경하지 않습니다."/></StackPanel></StackPanel>
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/></Grid.ColumnDefinitions>
+      <DataGrid ItemsSource="{Binding PendingCategories}" SelectedItem="{Binding SelectedCategory}" ScrollViewer.HorizontalScrollBarVisibility="Auto"><DataGrid.Columns><DataGridTextColumn Header="원인 · 폴더" Binding="{Binding Label}" Width="*"/><DataGridTextColumn Header="항목 수" Binding="{Binding Count}" Width="100"/></DataGrid.Columns></DataGrid>
+      <DataGrid Grid.Column="1" ItemsSource="{Binding PendingDetails}" SelectedItem="{Binding SelectedPending}" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Auto"><DataGrid.Columns><DataGridTextColumn Header="상태" Binding="{Binding State}" Width="120"/><DataGridTextColumn Header="전체 경로" Binding="{Binding Path}" Width="520"/><DataGridTextColumn Header="전체 이유" Binding="{Binding Reason}" Width="700"/></DataGrid.Columns></DataGrid>
+     </Grid>
     </DockPanel>
    </TabItem>
    <TabItem Header="저장된 작업">
     <DockPanel Margin="8"><StackPanel DockPanel.Dock="Top"><TextBlock Text="최근 100개 작업 · 새 작업은 이전 결과를 지우지 않습니다. 기존 Phase 4 인덱스는 별도로 보존됩니다." Margin="4"/><Button Content="선택 작업 결과 열기" Command="{Binding OpenHistoryCommand}" HorizontalAlignment="Left"/></StackPanel><ListBox ItemsSource="{Binding History}" SelectedItem="{Binding SelectedHistory}"/></DockPanel>
    </TabItem>
   </TabControl>
-  <StackPanel Grid.Row="4" Margin="0,8,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="경로 복사" Command="{Binding CopyCommand}"/><Button Content="파일 위치 열기" Command="{Binding RevealCommand}"/></StackPanel><TextBlock Text="{Binding PageText}" VerticalAlignment="Center"/></DockPanel><TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="#25496D"/></StackPanel>
+  <StackPanel Grid.Row="4" Margin="0,8,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="선택 중복 파일 휴지통 이동" Command="{Binding RecycleDuplicateCommand}" ToolTip="확인된 중복 그룹에서 한 복사본은 남기고 선택 파일만 Windows 휴지통으로 이동합니다."/><Button Content="경로 복사" Command="{Binding CopyCommand}"/><Button Content="파일 위치 열기" Command="{Binding RevealCommand}"/></StackPanel><TextBlock Text="{Binding PageText}" VerticalAlignment="Center"/></DockPanel><TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="#25496D"/></StackPanel>
  </Grid>
 </Window>

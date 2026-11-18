@@ -41,13 +41,13 @@ public sealed class WorkWindowTests
                 model.StartCommand.Execute(null); Wait();
                 Assert.Equal(2, model.Files.Count); Assert.Single(model.Groups);
                 Assert.Contains("완료", model.Status);
-                model.SelectedGroup = model.Groups[0]; model.LoadMembersCommand.Execute(null); Wait();
+                model.SelectedGroup = model.Groups[0]; Wait();
                 Assert.Equal(2, model.Members.Count);
                 model.SelectedHistory = Assert.Single(model.History);
                 model.OpenHistoryCommand.Execute(null); Wait();
                 Assert.Equal(2, model.Files.Count); Assert.Single(model.Groups);
                 var tabs = FindTabs(window); tabs.SelectedIndex = 1;
-                model.SelectedGroup = model.Groups[0]; model.LoadMembersCommand.Execute(null); Wait();
+                model.SelectedGroup = model.Groups[0]; Wait();
                 window.UpdateLayout();
                 var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32);
                 bitmap.Render(window);

@@ -13,7 +13,7 @@ public sealed record DuplicateGroup(string GroupId, string Status, long FileCoun
     public string SpaceText => Status == "ConfirmedDuplicate" ? $"{LogicalDuplicateBytes:N0} 바이트 (논리적 추정)" : "미검증";
     public string DataCountText => Status == "ConfirmedDuplicate" ? DataCount.ToString("N0") : "미검증";
 }
-public sealed record DuplicateMember(long FileId, string FullPath, long FileSize, string Status, string? Error, string? VolumeIdentifier = null)
+public sealed record DuplicateMember(long FileId, string FullPath, long FileSize, string Status, string? Error, string? VolumeIdentifier = null, string? PhysicalId = null)
 {
     public string FileName => Path.GetFileName(FullPath);
 }

@@ -4,6 +4,15 @@ namespace SpaceInspector.Infrastructure.Database;
 
 public sealed partial class SqliteIndexDatabase
 {
+    public Task MarkRecycledAsync(long fileId, string path, CancellationToken token = default) => Task.Run(() =>
+    {
+        token.ThrowIfCancellationRequested();
+        using var connection = Open(); using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Files SET ScanStatus='Missing',ScanError='사용자 요청으로 Windows 휴지통 이동',PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified',DuplicateError=NULL,DuplicateRunId=NULL WHERE FileId=$id AND FullPath=$path COLLATE NOCASE";
+        command.Parameters.AddWithValue("$id", fileId); command.Parameters.AddWithValue("$path", path);
+        command.ExecuteNonQuery();
+    }, token);
+
     public async Task RecoverWorkResultAsync()
     {
         var run = await Task.Run(() =>
