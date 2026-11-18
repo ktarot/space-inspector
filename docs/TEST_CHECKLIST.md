@@ -111,3 +111,4 @@
 - [x] 접근 오류 항목을 원인/폴더 기준으로 묶고 전체 메시지 가로 조회
 - [x] 선택 파일을 휴지통으로 보낸 뒤 작업 인덱스와 결과 갱신
 - [ ] Windows 실제 휴지통 복원 확인
+- [x] [Windows CI #44238794193](https://github.com/ktarot/space-inspector/actions/runs/44238794193): 69개 통과, 실패/건너뜀 0, publish 성공
