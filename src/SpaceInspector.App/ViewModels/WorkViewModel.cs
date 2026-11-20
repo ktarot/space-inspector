@@ -17,6 +17,40 @@ public sealed record PendingCategory(string Key, string Label, int Count);
 public sealed class WorkViewModel : ObservableObject, IDisposable
 {
     private readonly string _jobs;
+    private string? _keepFile;
+    private HashSet<string> _keptPaths = new(StringComparer.OrdinalIgnoreCase);
+    public bool IsKept(string path) => _keptPaths.Contains(path);
+    public void ToggleKeep(string path)
+    {
+        if (_keepFile is null || !CanConfigure) return;
+        try
+        {
+            var updated = new HashSet<string>(_keptPaths, StringComparer.OrdinalIgnoreCase);
+            if (!updated.Remove(path)) updated.Add(path);
+            File.WriteAllText(_keepFile + ".tmp", JsonSerializer.Serialize(updated));
+            File.Move(_keepFile + ".tmp", _keepFile, true);
+            _keptPaths = updated;
+            Status = IsKept(path) ? "보관 지정 · " + path : "보관 지정 해제 · " + path;
+            RefreshCommands();
+        }
+        catch (Exception ex) { Status = "보관 지정 저장 실패 · " + ex.Message; }
+    }
+    public async Task CopyGroupPathsAsync()
+    {
+        if (_session?.Result is not { } result || SelectedGroup is not { } group) return;
+        try
+        {
+            var paths = new List<string>();
+            for (int page = 0; ; page++)
+            {
+                var members = await result.GetDuplicateMembersAsync(group.GroupId, page, 100);
+                paths.AddRange(members.Select(m => m.FullPath));
+                if (members.Count < 100) break;
+            }
+            if (paths.Count > 0) Clipboard.SetText(string.Join(Environment.NewLine, paths));
+        }
+        catch (Exception ex) { Status = "경로 복사 실패 · " + ex.Message; }
+    }
     private readonly WindowsVolumeIdentityService _volumes = new();
     private WorkSession? _session;
     private PermissionWorker? _permissions;
@@ -68,7 +102,7 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     public string ReadVolume => $"읽기 {(Busy ? _permissions?.BytesRead ?? 0 : _session?.Record.BytesRead ?? 0):N0} 바이트 · 권한 작업은 파일 처리 후 합산";
     public string PendingSummary => $"응답 대기 {Pending.Count(p => p.State == "응답 대기"):N0}건 · 재시도 {Pending.Count(p => p.State is "재시도 예약" or "처리 중"):N0}건 · 제외/건너뜀 {Pending.Count(p => p.State is "보호 규칙으로 제외" or "건너뜀"):N0}건 — ‘응답 대기 · 제외’ 탭에서 처리";
     public bool CanPageMembers => SelectedGroup?.FileCount > 100;
-    public bool CanMoveSelectedToRecycle => SelectedGroup?.Status == "ConfirmedDuplicate" && SelectedGroup.DataCount > 1 && SelectedMember is { Status: "ConfirmedDuplicate", PhysicalId: not null };
+    public bool CanMoveSelectedToRecycle => SelectedMember is not null && !IsKept(SelectedMember.FullPath) && SelectedGroup?.Status == "ConfirmedDuplicate" && SelectedGroup.DataCount > 1 && SelectedMember is { Status: "ConfirmedDuplicate", PhysicalId: not null };
     public string PageText => $"파일 {_filePage + 1}페이지 / {_fileTotal:N0}개 · 중복 그룹 {_groupPage + 1}페이지 · 그룹 내 파일 {_memberPage + 1}페이지 (100개씩)";
     public string ScopeText => _session is null ? "선택한 대상에 대해서만 탐색하고 비교합니다. 기존 전체 인덱스는 사용하지 않습니다."
         : $"작업 {_session.Record.Started:yyyy-MM-dd HH:mm:ss} · {(_session.Record.Specification.Recursive ? "하위 폴더 포함" : "바로 아래 파일만")} · {string.Join(", ", _session.Record.Specification.Extensions)}\n{string.Join(" / ", _session.Record.Specification.Roots)}";
@@ -187,6 +221,10 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     }
     private void SetSession(string directory, WorkRecord record)
     {
+        _keepFile = Path.Combine(directory, "kept-files.json");
+        _keptPaths = File.Exists(_keepFile)
+            ? new(JsonSerializer.Deserialize<string[]>(File.ReadAllText(_keepFile)) ?? [], StringComparer.OrdinalIgnoreCase)
+            : new(StringComparer.OrdinalIgnoreCase);
         _permissions?.Dispose(); _permissions = new(directory, record.Specification, _volumes);
         _session = new(directory, record, _volumes, _permissions, _permissions.Source);
         Changed(nameof(ScopeText)); SyncPending();

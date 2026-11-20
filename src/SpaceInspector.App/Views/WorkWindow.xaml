@@ -3,6 +3,7 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="Space Inspector — 선택 범위 탐색·비교" Width="1220" Height="900" MinWidth="980" MinHeight="720" Background="#F3F6FA">
  <Window.Resources>
+  <Style TargetType="DataGridRow"><Setter Property="ContextMenu"><Setter.Value><ContextMenu/></Setter.Value></Setter></Style>
   <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
   <Style TargetType="Button"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="12,7"/></Style>
   <Style TargetType="CheckBox"><Setter Property="Margin" Value="8,6"/></Style>
