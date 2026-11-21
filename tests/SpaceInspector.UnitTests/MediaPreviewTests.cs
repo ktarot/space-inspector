@@ -9,6 +9,17 @@ using SpaceInspector.Infrastructure.FileSystem;
 using Xunit;
 namespace SpaceInspector.UnitTests;
 
+// Hosted CI has no usable audio endpoint and does not guarantee a desktop decoder.
+// Local runs still execute both native smoke tests unless explicitly opted out.
+public sealed class NativeMediaFactAttribute : FactAttribute
+{
+    public NativeMediaFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("SPACE_INSPECTOR_SKIP_NATIVE_MEDIA_TESTS") == "1")
+            Skip = "Requires Windows desktop media decoder and audio output; run locally without SPACE_INSPECTOR_SKIP_NATIVE_MEDIA_TESTS.";
+    }
+}
+
 public sealed class MediaPreviewTests
 {
     private static IndexedFile Item(string extension) => new(1, "fixture" + extension, @"C:\fixture" + extension, 10, null, "Normal", null, "fixture-volume");
@@ -118,7 +129,7 @@ public sealed class MediaPreviewTests
         } finally { window.Close(); }
     });
 
-    [Fact]
+    [NativeMediaFact]
     public void NativeWindowsDecoderPlaysSilentWaveAndReleasesIt() => OnSta(() => {
         var path = Path.Combine(Path.GetTempPath(), "SI-media-" + Guid.NewGuid().ToString("N") + ".wav");
         WriteWave(path);
@@ -145,7 +156,7 @@ public sealed class MediaPreviewTests
         Assert.Throws<IOException>(() => new PreviewFile(@"\\server\share\audio.wav", null).Validate());
         Assert.Equal(PreviewKind.Unsupported, PreviewFile.Classify("project.fla"));
     }
-    [Fact]
+    [NativeMediaFact]
     public void NativeWindowsDecoderOpensAndSeeksSyntheticVideo() => OnSta(() => {
         var path = Path.Combine(Path.GetTempPath(), "SI-video-" + Guid.NewGuid().ToString("N") + ".avi");
         WriteAvi(path);
