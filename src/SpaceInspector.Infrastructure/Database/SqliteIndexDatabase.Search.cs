@@ -29,6 +29,11 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
             command.Parameters.AddWithValue(key, value);
             return key;
         }
+        if (search.DuplicateStatuses.Count > 0)
+            conditions.Add("(CASE WHEN DuplicateRunId IS NOT NULL THEN DuplicateStatus WHEN ScanStatus='Normal' THEN 'Unverified' END) IN (" + string.Join(',', search.DuplicateStatuses.Select(Parameter)) + ")");
+        if (search.DuplicateGroupId is { } group) conditions.Add("DuplicateGroupId=" + Parameter(group));
+        if (search.IncludedPaths is { } paths)
+            conditions.Add("FullPath COLLATE NOCASE IN (SELECT value FROM json_each(" + Parameter(System.Text.Json.JsonSerializer.Serialize(paths)) + "))");
         if (!string.IsNullOrWhiteSpace(search.Name)) conditions.Add("contains_ignore_case(FileName," + Parameter(search.Name) + ")");
         if (search.Extensions.Count > 0)
             conditions.Add("Extension COLLATE NOCASE IN (" + string.Join(',', search.Extensions.Select(e => Parameter("." + e.Trim().TrimStart('.')))) + ")");
@@ -61,7 +66,9 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
             FileSort.Modified => "julianday(ModifiedTimeUtc)", FileSort.Created => "julianday(CreationTimeUtc)",
             FileSort.Path => "FullPath COLLATE NOCASE", _ => "FileId"
         };
-        command.CommandText = "SELECT FileId,FileName,FullPath,FileSize,ModifiedTimeUtc,ScanStatus,IsCloudPlaceholder,VolumeIdentifier FROM Files" + where
+        command.CommandText = "SELECT FileId,FileName,FullPath,FileSize,ModifiedTimeUtc,ScanStatus,IsCloudPlaceholder,VolumeIdentifier,CASE WHEN DuplicateRunId IS NOT NULL THEN DuplicateStatus WHEN ScanStatus='Normal' THEN 'Unverified' END,DuplicateGroupId,FileSystemIdentifier,"
+            + "(SELECT COUNT(*) FROM Files g WHERE g.DuplicateGroupId=Files.DuplicateGroupId),"
+            + "(SELECT COUNT(DISTINCT FileSystemIdentifier) FROM Files g WHERE g.DuplicateGroupId=Files.DuplicateGroupId) FROM Files" + where
             + " ORDER BY " + sort + (search.Descending ? " DESC" : " ASC") + ",FileId ASC LIMIT $limit OFFSET $offset";
         command.Parameters.AddWithValue("$limit", pageSize);
         command.Parameters.AddWithValue("$offset", (long)pageNumber * pageSize);
@@ -71,7 +78,9 @@ public sealed partial class SqliteIndexDatabase : IFileSearchRepository
         {
             cancellationToken.ThrowIfCancellationRequested();
             files.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetInt64(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6), reader.IsDBNull(7) ? null : reader.GetString(7)));
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetBoolean(6), reader.IsDBNull(7) ? null : reader.GetString(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8), reader.IsDBNull(9) ? null : reader.GetString(9),
+                reader.IsDBNull(10) ? null : reader.GetString(10), reader.GetInt64(11), reader.GetInt64(12)));
         }
         return new IndexPage(files, count, pageNumber, pageSize);
     }, cancellationToken); }

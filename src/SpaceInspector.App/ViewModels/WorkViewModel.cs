@@ -14,7 +14,7 @@ namespace SpaceInspector.App.ViewModels;
 public sealed record SavedWork(string Directory, string Label) { public override string ToString() => Label; }
 public sealed record PendingCategory(string Key, string Label, int Count);
 
-public sealed class WorkViewModel : ObservableObject, IDisposable
+public sealed partial class WorkViewModel : ObservableObject, IDisposable
 {
     private readonly string _jobs;
     private string? _keepFile;
@@ -31,6 +31,8 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
             File.Move(_keepFile + ".tmp", _keepFile, true);
             _keptPaths = updated;
             Status = IsKept(path) ? "보관 지정 · " + path : "보관 지정 해제 · " + path;
+            for (var i = 0; i < Files.Count; i++)
+                if (string.Equals(Files[i].FullPath, path, StringComparison.OrdinalIgnoreCase)) Files[i] = Files[i] with { IsKept = IsKept(path) };
             RefreshCommands();
         }
         catch (Exception ex) { Status = "보관 지정 저장 실패 · " + ex.Message; }
@@ -82,7 +84,18 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     private IndexedFile? _selectedFile;
     public DuplicateGroup? SelectedGroup { get => _selectedGroup; set { _selectedGroup = value; Members.Clear(); SelectedMember = null; _memberPage = 0; Changed(); RefreshCommands(); if (value is not null) _ = LoadMembersAsync(); } }
     public DuplicateMember? SelectedMember { get => _selectedMember; set { _selectedMember = value; if (value is not null) { _selectedFile = null; Changed(nameof(SelectedFile)); } Changed(); } }
-    public IndexedFile? SelectedFile { get => _selectedFile; set { _selectedFile = value; if (value is not null) { _selectedMember = null; Changed(nameof(SelectedMember)); } Changed(); } }
+    public IndexedFile? SelectedFile
+    {
+        get => _selectedFile;
+        set
+        {
+            _selectedFile = value;
+            _selectedMember = value?.DuplicateGroupId is not null ? new(value.FileId, value.FullPath, value.FileSize ?? 0,
+                value.DuplicateStatus ?? "Unverified", null, value.VolumeIdentifier, value.PhysicalId) : null;
+            _selectedGroup = value?.DuplicateGroupId is { } id ? new(id, value.DuplicateStatus ?? "Unverified", value.GroupFileCount, value.GroupDataCount, 0) : null;
+            Changed(); Changed(nameof(SelectedMember)); Changed(nameof(SelectedGroup)); RefreshCommands();
+        }
+    }
     public bool Recursive { get; set; } = true;
     public bool Images { get; set; } = true;
     public bool Videos { get; set; }
@@ -90,6 +103,29 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     public bool Temporary { get; set; }
     public string ExtraExtensions { get; set; } = "";
     public string NameFilter { get; set; } = "";
+    public int MediaFilter { get; set; }
+    public string MinimumSizeMiB { get; set; } = "";
+    public string MaximumSizeMiB { get; set; } = "";
+    private FileSearch CaptureSearch()
+    {
+        static long? Bytes(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            if (!decimal.TryParse(text, out var size) || size < 0 || size > long.MaxValue / 1048576m)
+                throw new ArgumentException("파일 크기는 0 이상의 숫자로 입력하세요.");
+            return (long)(size * 1048576m);
+        }
+        var extensions = MediaFilter switch {
+            1 => "jpg jpeg gif png bmp webp tif tiff heic avif",
+            2 => "avi mp4 mpg mpeg wmv fla flv mov mkv webm m4v",
+            3 => "wav m4a mp3 wma aac flac ogg opus", _ => ""
+        };
+        var search = new FileSearch { Name = NameFilter, Extensions = extensions.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(e => "." + e).ToArray(), MinimumBytes = Bytes(MinimumSizeMiB), MaximumBytes = Bytes(MaximumSizeMiB),
+            DuplicateStatuses = ComparisonFilter switch { 1 => ["ConfirmedDuplicate"], 2 => ["StrongCandidate", "SuspectedDuplicate"], 3 => ["Pending", "Unverified"], _ => [] },
+            IncludedPaths = KeptOnly ? _keptPaths.ToArray() : null, DuplicateGroupId = GroupFilter,
+            Sort = (FileSort)SortIndex, Descending = SortDescending };
+        search.Validate(); return search;
+    }
     public bool FolderMode { get => _folderMode; set { _folderMode = value; Changed(); Changed(nameof(DriveMode)); } }
     public bool DriveMode { get => !_folderMode; set { if (value) FolderMode = false; } }
     public bool Busy { get => _busy; private set { _busy = value; Changed(); Changed(nameof(CanConfigure)); RefreshCommands(); } }
@@ -100,10 +136,10 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     public string Detail { get => _detail; private set { _detail = value; Changed(); } }
     public string Elapsed => (Busy ? _watch.Elapsed : TimeSpan.FromMilliseconds(_session?.Record.ElapsedMilliseconds ?? 0)).ToString(@"hh\:mm\:ss");
     public string ReadVolume => $"읽기 {(Busy ? _permissions?.BytesRead ?? 0 : _session?.Record.BytesRead ?? 0):N0} 바이트 · 권한 작업은 파일 처리 후 합산";
-    public string PendingSummary => $"응답 대기 {Pending.Count(p => p.State == "응답 대기"):N0}건 · 재시도 {Pending.Count(p => p.State is "재시도 예약" or "처리 중"):N0}건 · 제외/건너뜀 {Pending.Count(p => p.State is "보호 규칙으로 제외" or "건너뜀"):N0}건 — ‘응답 대기 · 제외’ 탭에서 처리";
+    public string PendingSummary => $"응답 대기 {Pending.Count(p => p.State == "응답 대기"):N0}건 · 재시도 {Pending.Count(p => p.State is "재시도 예약" or "처리 중"):N0}건 · 제외/건너뜀 {Pending.Count(p => p.State is "보호 규칙으로 제외" or "건너뜀"):N0}건 — 하단 응답 대기 내역에서 처리";
     public bool CanPageMembers => SelectedGroup?.FileCount > 100;
     public bool CanMoveSelectedToRecycle => SelectedMember is not null && !IsKept(SelectedMember.FullPath) && SelectedGroup?.Status == "ConfirmedDuplicate" && SelectedGroup.DataCount > 1 && SelectedMember is { Status: "ConfirmedDuplicate", PhysicalId: not null };
-    public string PageText => $"파일 {_filePage + 1}페이지 / {_fileTotal:N0}개 · 중복 그룹 {_groupPage + 1}페이지 · 그룹 내 파일 {_memberPage + 1}페이지 (100개씩)";
+    public string PageText => $"검색 결과 {_fileTotal:N0}개 · {_filePage + 1} / {Math.Max(1, (_fileTotal + 99) / 100)}페이지 (100개씩)";
     public string ScopeText => _session is null ? "선택한 대상에 대해서만 탐색하고 비교합니다. 기존 전체 인덱스는 사용하지 않습니다."
         : $"작업 {_session.Record.Started:yyyy-MM-dd HH:mm:ss} · {(_session.Record.Specification.Recursive ? "하위 폴더 포함" : "바로 아래 파일만")} · {string.Join(", ", _session.Record.Specification.Extensions)}\n{string.Join(" / ", _session.Record.Specification.Roots)}";
     public AsyncCommand StartCommand { get; }
@@ -129,9 +165,11 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     public WorkViewModel(string jobs)
     {
         _jobs = jobs;
+        InitializeWorkspaceCommands();
+        InitializeFileActionCommands();
         void Error(Exception ex) => Status = "작업 오류 · " + ex.Message;
         StartCommand = new(StartAsync, Error, () => CanConfigure);
-        CancelCommand = new(() => { _cancellation?.Cancel(); Status = "중단 요청 · 저장된 결과는 유지합니다."; }, () => Busy && _cancellation is not null);
+        CancelCommand = new(() => { _cancellation?.Cancel(); _fileChangeCancellation?.Cancel(); Status = "중단 요청 · 저장된 결과는 유지합니다."; }, () => Busy && (_fileChanging ? _fileChangeCancellation is not null : _cancellation is not null));
         AddFolderCommand = new(() =>
         {
             var picker = new OpenFolderDialog { Title = "작업할 폴더 선택", Multiselect = true };
@@ -191,6 +229,7 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
             Stage = "초기 설정 · 드라이브 확인";
             foreach (var drive in await new LocalDriveService().GetLocalDrivesAsync()) Drives.Add(new(drive));
             Stage = "저장된 작업 목록 확인";
+            LoadSavedViews();
             await LoadHistoryAsync(); Status = "준비 완료 · 대상과 파일 종류를 정한 후 탐색·비교 시작을 누르세요.";
         }
         catch (Exception ex) { Status = "초기화 오류 · " + ex.Message; }
@@ -221,6 +260,7 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     }
     private void SetSession(string directory, WorkRecord record)
     {
+        GroupFilter = null; Changed(nameof(GroupFilterText));
         _keepFile = Path.Combine(directory, "kept-files.json");
         _keptPaths = File.Exists(_keepFile)
             ? new(JsonSerializer.Deserialize<string[]>(File.ReadAllText(_keepFile)) ?? [], StringComparer.OrdinalIgnoreCase)
@@ -246,7 +286,7 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
         {
             Status = "선택한 범위 탐색·비교 중 · 응답 대기 항목이 있어도 계속합니다.";
             _execution = session.ExecuteAsync(initial, progress, _cancellation.Token); await _execution;
-            Status = session.Record.Status;
+            ReloadKeptPaths(); Status = session.Record.Status;
         }
         catch (Exception ex) { Status = session.Record.Status + " · " + ex.Message; }
         finally
@@ -277,11 +317,13 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
     private async Task LoadResultsAsync()
     {
         if (_session is null) return;
-        var page = await _session.Index.SearchAsync(new FileSearch { Name = NameFilter }, _filePage, 100);
-        _fileTotal = page.TotalCount; Files.Clear(); foreach (var file in page.Files) Files.Add(file);
+        var selectedPath = SelectedFile?.FullPath;
+        var page = await (_session.Result ?? _session.Index).SearchAsync(CaptureSearch(), _filePage, 100);
+        _fileTotal = page.TotalCount; Files.Clear(); foreach (var file in page.Files) Files.Add(file with { IsKept = IsKept(file.FullPath) });
         Groups.Clear(); Members.Clear(); SelectedGroup = null; SelectedMember = null; SelectedFile = null;
         Changed(nameof(SelectedGroup)); Changed(nameof(SelectedMember)); Changed(nameof(SelectedFile));
         if (_session.Result is { } result) foreach (var group in await result.GetDuplicateGroupsAsync(_groupPage, 100)) Groups.Add(group);
+        SelectedFile = Files.FirstOrDefault(f => f.FullPath == selectedPath);
         Changed(nameof(PageText)); RefreshCommands();
     }
     private async Task BrowseAsync()
@@ -374,7 +416,7 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
             Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(member.FullPath,
                 Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
             await result.MarkRecycledAsync(member.FileId, member.FullPath);
-            if (_session?.Result is { } resultIndex) await resultIndex.MarkRecycledAsync(member.FileId, member.FullPath);
+            if (_session?.Index is { } resultIndex) await resultIndex.MarkRecycledAsync(member.FileId, member.FullPath);
             Status = "선택한 파일을 휴지통으로 옮겼습니다. 같은 그룹의 다른 파일은 유지했습니다.";
             SelectedMember = null;
             await LoadResultsAsync();
@@ -398,8 +440,10 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
             foreach (var name in new[] { nameof(Recursive), nameof(Images), nameof(Videos), nameof(Audio), nameof(Temporary), nameof(ExtraExtensions) }) Changed(name);
             _filePage = _groupPage = _memberPage = 0;
             await _session!.Index.InitializeAsync();
+            var fileActions = new WorkFileActions(_session, _volumes);
+            await fileActions.RecoverAsync(); ReloadKeptPaths();
             if (_session.Result is { } result) await result.RecoverWorkResultAsync();
-            Status = record.Status; await LoadResultsAsync();
+            Status = record.Status + (fileActions.RecoveryNotes.Count == 0 ? "" : " · " + string.Join(" · ", fileActions.RecoveryNotes)); await LoadResultsAsync();
         }
         finally { Busy = false; }
     }
@@ -409,7 +453,10 @@ public sealed class WorkViewModel : ObservableObject, IDisposable
         OpenHistoryCommand.Refresh(); FilterCommand.Refresh(); PreviousFilesCommand.Refresh(); NextFilesCommand.Refresh();
         PreviousGroupsCommand.Refresh(); NextGroupsCommand.Refresh(); LoadMembersCommand.Refresh(); PreviousMembersCommand.Refresh(); NextMembersCommand.Refresh(); CopyCommand.Refresh(); RevealCommand.Refresh();
         RecycleDuplicateCommand?.Refresh();
+        UndoFileChangeCommand?.Refresh(); RenameFileCommand?.Refresh(); MoveFileCommand?.Refresh(); RecoverFileChangesCommand?.Refresh();
+        SaveViewCommand?.Refresh(); ApplyViewCommand?.Refresh(); DeleteViewCommand?.Refresh();
+        ResetFiltersCommand?.Refresh(); KeepSelectedCommand?.Refresh(); ShowSameGroupCommand?.Refresh();
     }
-    public async Task StopAsync() { _cancellation?.Cancel(); while (Active) await Task.Delay(50); }
-    public void Dispose() { _timer.Stop(); _permissions?.Dispose(); _cancellation?.Dispose(); }
+    public async Task StopAsync() { _cancellation?.Cancel(); _fileChangeCancellation?.Cancel(); while (Active) await Task.Delay(50); }
+    public void Dispose() { _timer.Stop(); _permissions?.Dispose(); _cancellation?.Dispose(); _fileChangeCancellation?.Dispose(); }
 }

@@ -5,6 +5,11 @@ public enum FileSort { IndexedOrder, Name, Size, Modified, Created, Path }
 public sealed record FileSearch
 {
     public string? Name { get; init; }
+    public IReadOnlyList<string> DuplicateStatuses { get; init; } = [];
+    public string? DuplicateGroupId { get; init; }
+    // Null means no path filter; an empty list deliberately matches no files.
+    public IReadOnlyList<string>? IncludedPaths { get; init; }
+
     public IReadOnlyList<string> Extensions { get; init; } = [];
     public IReadOnlyList<string> Roots { get; init; } = [];
     public long? MinimumBytes { get; init; }

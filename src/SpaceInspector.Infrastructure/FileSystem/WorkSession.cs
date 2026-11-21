@@ -83,6 +83,7 @@ public sealed class WorkSession
             Record = Record with { Status = "실행 중" }; Save();
             progress?.Report(new("작업 인덱스 준비 중"));
             await Index.InitializeAsync(token);
+            await new WorkFileActions(this, _volumes).RecoverAsync();
             if (initial) await Scan(Record.Specification.Roots, progress, token);
             do
             {

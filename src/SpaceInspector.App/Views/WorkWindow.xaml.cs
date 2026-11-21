@@ -16,6 +16,18 @@ public partial class WorkWindow : Window
     public WorkWindow(WorkViewModel viewModel)
     {
         InitializeComponent(); DataContext = viewModel;
+        viewModel.ChooseFileTarget = (file, rename) => {
+            var dialog = new FileChangeDialog(file, rename) { Owner = this };
+            return dialog.ShowDialog() == true ? dialog.TargetPath : null;
+        };
+        viewModel.ChooseBatchTargets = (files, rename) => {
+            var dialog = new BatchFileChangeDialog(files, rename) { Owner = this };
+            return dialog.ShowDialog() == true ? dialog.Requests : null;
+        };
+        viewModel.ConfirmBatchChanges = plans => BatchFileChangeDialog.Confirm(this, plans);
+        viewModel.ShowBatchResults = outcomes => BatchFileChangeDialog.ShowResults(this, outcomes);
+        viewModel.BeforeFileChange += ResultsBrowser.ReleasePreviews;
+        viewModel.AfterFileChange += ResultsBrowser.ResumePreviews;
         AddHandler(ContextMenuService.ContextMenuOpeningEvent, new ContextMenuEventHandler(OpenRowMenu));
         Loaded += async (_, _) => await viewModel.InitializeAsync();
         Closing += async (_, e) =>
@@ -34,7 +46,9 @@ public partial class WorkWindow : Window
     {
         var row = FindRow(e.OriginalSource as DependencyObject);
         if (row is null || DataContext is not WorkViewModel vm) { e.Handled = true; return; }
-        row.IsSelected = true;
+        if (row.DataContext is IndexedFile contextFile) ResultsBrowser.SelectContextFile(contextFile);
+        else if (row is DataGridRow gridRow) gridRow.IsSelected = true;
+        else if (row is ListBoxItem listRow) listRow.IsSelected = true;
         var menu = new ContextMenu();
         void Action(string title, Action action, bool enabled = true)
         {
@@ -48,15 +62,15 @@ public partial class WorkWindow : Window
             menu.Items.Add(item);
         }
         string? path = null, volume = null;
-        if (row.Item is IndexedFile file) { vm.SelectedFile = file; path = file.FullPath; volume = file.VolumeIdentifier; }
-        else if (row.Item is DuplicateMember member) { vm.SelectedMember = member; path = member.FullPath; volume = member.VolumeIdentifier; }
-        else if (row.Item is DuplicateGroup group)
+        if (row.DataContext is IndexedFile file) { path = file.FullPath; volume = file.VolumeIdentifier; }
+        else if (row.DataContext is DuplicateMember member) { vm.SelectedMember = member; path = member.FullPath; volume = member.VolumeIdentifier; }
+        else if (row.DataContext is DuplicateGroup group)
         {
             if (vm.SelectedGroup != group) vm.SelectedGroup = group;
             Command("그룹 파일 보기", vm.LoadMembersCommand);
             Action("그룹 내 파일 경로 복사", () => _ = vm.CopyGroupPathsAsync(), vm.CanConfigure);
         }
-        else if (row.Item is PendingItem pending)
+        else if (row.DataContext is PendingItem pending)
         {
             vm.SelectedPending = pending;
             bool retryable = pending.State == "응답 대기";
@@ -80,23 +94,27 @@ public partial class WorkWindow : Window
                 Validate(); var info = new FileInfo(path);
                 MessageBox.Show(this, $"{path}\n\n크기: {info.Length:N0} 바이트\n수정: {info.LastWriteTime}\n속성: {info.Attributes}\n보관 지정: {(vm.IsKept(path) ? "예" : "아니요")}", "파일 정보");
             }, vm.CanConfigure);
+            Command("선택 파일 변경 되돌리기", vm.UndoFileChangeCommand);
+            Command("이름 변경", vm.RenameFileCommand);
+            Command("파일 이동", vm.MoveFileCommand);
             Command("경로 복사", vm.CopyCommand);
             Command("포함 폴더 열기", vm.RevealCommand);
-            if (row.Item is DuplicateMember)
+            if (row.DataContext is DuplicateMember or IndexedFile)
             {
                 menu.Items.Add(new Separator());
                 Action(vm.IsKept(path) ? "보관 지정 해제" : "보관할 파일로 지정", () => vm.ToggleKeep(path), vm.CanConfigure);
+                Command("같은 중복 그룹만 보기", vm.ShowSameGroupCommand);
                 Command("선택 중복 사본을 휴지통으로 이동", vm.RecycleDuplicateCommand);
             }
         }
         e.Handled = true;
         if (menu.Items.Count > 0) { menu.PlacementTarget = row; menu.IsOpen = true; }
     }
-    private static DataGridRow? FindRow(DependencyObject? current)
+    private static FrameworkElement? FindRow(DependencyObject? current)
     {
         while (current is not null)
         {
-            if (current is DataGridRow row) return row;
+            if (current is DataGridRow or ListBoxItem) return (FrameworkElement)current;
             current = current is System.Windows.Media.Visual || current is System.Windows.Media.Media3D.Visual3D
                 ? System.Windows.Media.VisualTreeHelper.GetParent(current) : LogicalTreeHelper.GetParent(current);
         }

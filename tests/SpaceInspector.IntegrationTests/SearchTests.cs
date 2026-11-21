@@ -98,5 +98,27 @@ public sealed class SearchTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => db.SearchAsync(new(), 0, 200, cancellation.Token));
     }
 
+    [Fact]
+    public async Task SavedPathAndComparisonFiltersApplyBeforePagination()
+    {
+        var db = await Seed();
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + DbPath + ";Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE Files SET DuplicateRunId=1,DuplicateStatus='ConfirmedDuplicate',DuplicateGroupId='test-group',FileSystemIdentifier='physical-' || FileId WHERE Extension='.pdf' COLLATE NOCASE";
+            await command.ExecuteNonQueryAsync();
+        }
+        var query = new FileSearch { DuplicateStatuses = ["ConfirmedDuplicate"], Extensions = ["pdf"] };
+        var first = await db.SearchAsync(query, 0, 1);
+        var second = await db.SearchAsync(query, 1, 1);
+        Assert.Equal(2, first.TotalCount); Assert.Equal(2, Assert.Single(first.Files).GroupDataCount);
+        var target = Assert.Single(second.Files);
+        var kept = await db.SearchAsync(query with { IncludedPaths = [target.FullPath.ToUpperInvariant()] }, 0, 1);
+        Assert.Equal(target.FileId, Assert.Single(kept.Files).FileId);
+        Assert.Empty((await db.SearchAsync(query with { IncludedPaths = [] }, 0, 100)).Files);
+        Assert.Empty((await db.SearchAsync(query with { DuplicateGroupId = "missing" }, 0, 100)).Files);
+        Assert.Empty((await db.SearchAsync(query with { Extensions = ["jpg"] }, 0, 100)).Files);
+    }
+
     public void Dispose() { if (Directory.Exists(_area)) Directory.Delete(_area, true); }
 }

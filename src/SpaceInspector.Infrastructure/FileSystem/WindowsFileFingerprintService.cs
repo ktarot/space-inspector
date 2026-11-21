@@ -94,7 +94,7 @@ public sealed class WindowsFileFingerprintService(IVolumeIdentityService volumes
             throw new IOException("시스템·프로그램 보호 범위는 기본적으로 제외합니다.");
     }
 
-    private static SafeFileHandle OpenFile(string path, uint access)
+    internal static SafeFileHandle OpenFile(string path, uint access)
     {
         var full = Path.GetFullPath(path);
         var handle = CreateFile(@"\\?\" + full, access, 1, IntPtr.Zero, 3, Flags, IntPtr.Zero);
@@ -102,7 +102,7 @@ public sealed class WindowsFileFingerprintService(IVolumeIdentityService volumes
         return handle;
     }
 
-    private static string ValidateHandle(SafeFileHandle handle, DuplicateCandidate file)
+    internal static string ValidateHandle(SafeFileHandle handle, DuplicateCandidate file)
     {
         if (!GetFileInformationByHandle(handle, out var info) || !GetFileInformationByHandleEx(handle, 18, out var id, 24))
             throw new Win32Exception(Marshal.GetLastWin32Error());

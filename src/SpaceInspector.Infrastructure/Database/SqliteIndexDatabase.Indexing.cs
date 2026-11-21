@@ -131,7 +131,7 @@ public sealed partial class SqliteIndexDatabase
             command.Parameters.AddWithValue("$recursive", _reconcileRecursively ? 1 : 0);
             command.CommandText = """
                 UPDATE Files SET ScanStatus='Missing', PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL,DuplicateStatus='Unverified'
-                WHERE (LastSeenScanId IS NULL OR LastSeenScanId <> $id)
+                WHERE ScanStatus<>'MovedOutsideScope' AND (LastSeenScanId IS NULL OR LastSeenScanId <> $id)
                 AND EXISTS (SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id
                     AND (Files.VolumeIdentifier=s.VolumeIdentifier OR (Files.VolumeIdentifier IS NULL AND s.VolumeIdentifier IS NULL))
                     AND ($recursive=1 OR Files.ParentDirectory=s.RootPath COLLATE NOCASE)
@@ -143,14 +143,14 @@ public sealed partial class SqliteIndexDatabase
         }
         command.CommandText = """
             UPDATE Files SET ScanStatus='NeedsRescan',DuplicateStatus='Unverified',PartialHash=NULL,FullHash=NULL,DuplicateGroupId=NULL
-                WHERE EXISTS (SELECT 1 FROM ScanIssues i WHERE i.ScanId=$id
+                WHERE ScanStatus<>'MovedOutsideScope' AND EXISTS (SELECT 1 FROM ScanIssues i WHERE i.ScanId=$id
                 AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
                 AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
-            UPDATE Files SET ScanStatus='AccessDenied' WHERE EXISTS (SELECT 1 FROM ScanIssues i
+            UPDATE Files SET ScanStatus='AccessDenied' WHERE ScanStatus<>'MovedOutsideScope' AND EXISTS (SELECT 1 FROM ScanIssues i
                 WHERE i.ScanId=$id AND i.Status='AccessDenied'
                 AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
                 AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
-            UPDATE Files SET ScanStatus='DeviceUnavailable' WHERE EXISTS (SELECT 1 FROM ScanIssues i
+            UPDATE Files SET ScanStatus='DeviceUnavailable' WHERE ScanStatus<>'MovedOutsideScope' AND EXISTS (SELECT 1 FROM ScanIssues i
                 WHERE i.ScanId=$id AND i.Status='Unavailable'
                 AND EXISTS(SELECT 1 FROM ScanScopes s WHERE s.ScanId=$id AND (s.VolumeIdentifier=Files.VolumeIdentifier OR s.VolumeIdentifier IS NULL))
                 AND (Files.FullPath=i.Path COLLATE NOCASE OR substr(Files.FullPath,1,length(i.PathPrefix))=i.PathPrefix COLLATE NOCASE));
